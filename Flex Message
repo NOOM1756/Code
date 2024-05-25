@@ -1,0 +1,176 @@
+// การตั้งค่า LINE Messaging API
+const LINE_TOKEN = 'xxxxxxx'; //ใส่ไลน์โทเคนของคุณ
+
+// ฟังก์ชั่นหลักที่ถูกเรียกจาก Webhook ของ LINE
+function doPost(e) {
+  const log = e.postData.contents;
+  Logger.log(log); // บันทึกข้อมูลที่ได้รับจาก LINE
+  const replyToken = JSON.parse(e.postData.contents).events[0].replyToken;
+  const userMessage = JSON.parse(e.postData.contents).events[0].message.text;
+  const employeeData = getEmployeeData(userMessage);
+  
+  if (employeeData) {
+    sendReply(replyToken, createFlexMessage(employeeData));
+  } else {
+    sendReply(replyToken, { type: 'text', text: 'ไม่พบข้อมูลพนักงานที่คุณระบุ' });
+  }
+  return ContentService.createTextOutput(JSON.stringify({ 'status': 'ok' })).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ฟังก์ชั่นดึงข้อมูลจาก Google Sheets ตาม EmployeeID
+function getEmployeeData(employeeID) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('xxxx'); // ปรับชื่อชีทตามที่คุณใช้งาน
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == employeeID) { // สมมติว่า EmployeeID อยู่ที่คอลัมน์แรก
+      let employeeData = {};
+      headers.forEach((header, index) => {
+        employeeData[header] = data[i][index];
+      });
+      return employeeData;
+    }
+  }
+  return null;
+}
+
+// ฟังก์ชั่นสร้าง Flex Message
+function createFlexMessage(employeeData) {
+  return {
+    "type": "flex",
+    "altText": "ข้อมูลสลีปเงินเดือน",
+    "contents": {
+      "type": "bubble",
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+          {
+            "type": "text",
+            "text": "สลีปเงินเดือน",
+            "weight": "bold",
+            "size": "xl"
+          },
+          {
+            "type": "box",
+            "layout": "vertical",
+            "margin": "lg",
+            "spacing": "sm",
+            "contents": [
+              {
+                "type": "box",
+                "layout": "baseline",
+                "spacing": "sm",
+                "contents": [
+                  {
+                    "type": "text",
+                    "text": "ชื่อพนักงาน",
+                    "color": "#aaaaaa",
+                    "size": "sm",
+                    "flex": 1
+                  },
+                  {
+                    "type": "text",
+                    "text": employeeData.column_B,
+                    "wrap": true,
+                    "color": "#666666",
+                    "size": "sm",
+                    "flex": 5
+                  }
+                ]
+              },
+              {
+                "type": "box",
+                "layout": "baseline",
+                "spacing": "sm",
+                "contents": [
+                  {
+                    "type": "text",
+                    "text": "เงินเดือน",
+                    "color": "#aaaaaa",
+                    "size": "sm",
+                    "flex": 1
+                  },
+                  {
+                    "type": "text",
+                    "text": employeeData.column_C,
+                    "wrap": true,
+                    "color": "#666666",
+                    "size": "sm",
+                    "flex": 5
+                  }
+                ]
+              },
+              {
+                "type": "box",
+                "layout": "baseline",
+                "spacing": "sm",
+                "contents": [
+                  {
+                    "type": "text",
+                    "text": "ระดับ/ชั้น",
+                    "color": "#aaaaaa",
+                    "size": "sm",
+                    "flex": 1
+                  },
+                  {
+                    "type": "text",
+                    "text": employeeData.column_D,
+                    "wrap": true,
+                    "color": "#666666",
+                    "size": "sm",
+                    "flex": 5
+                  }
+                
+                ]
+              },
+              {
+                "type": "box",
+                "layout": "baseline",
+                "spacing": "sm",
+                "contents": [
+                  {
+                    "type": "text",
+                    "text": "พ.ส.ร.",
+                    "color": "#aaaaaa",
+                    "size": "sm",
+                    "flex": 1
+                  },
+                  {
+                    "type": "text",
+                    "text": employeeData.column_E,
+                    "wrap": true,
+                    "color": "#666666",
+                    "size": "sm",
+                    "flex": 5
+                  }
+                
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  };
+}
+
+// ฟังก์ชั่นส่งข้อความตอบกลับ
+function sendReply(replyToken, message) {
+  const url = 'https://api.line.me/v2/bot/message/reply';
+  const data = {
+    'replyToken': replyToken,
+    'messages': [message]
+  };
+  const options = {
+    'headers': {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Authorization': 'Bearer ' + LINE_TOKEN
+    },
+    'method': 'post',
+    'payload': JSON.stringify(data)
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  Logger.log(response.getContentText()); // บันทึกการตอบกลับจาก LINE API
+}
