@@ -1,0 +1,634 @@
+//「 🐸🐸🐸 ดึงข้อมูลมาจากชีทชื่อ SETTING 🐸🐸🐸 」
+var file = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('SETTING');  //🧿เป็นการอ้างอิงแหล่งถึงไฟล์ปัจจุบันที่ใช้งานอยู่ ในชีทที่ชื่อว่า "SETTING"💥
+var file_id = file.getRange('C5').getValue();                                //🧿ข้อมูลชีทไอดี > ดึงมาจากเซล์ C5
+var token_line = file.getRange('C6').getValue();                             //🧿ข้อมูลโทเค่น > ดึงมาจากเซล์ C6
+
+var CHANNEL_ACCESS_TOKEN = token_line;
+var line_endpoint = 'https://api.line.me/v2/bot/message/reply';
+
+var data_sheet = SpreadsheetApp.openById(file_id).getSheets() [0];             //🧿อ้างอิงจากโค้ดบรรทัดที่ 2 บรรทัดนี้จะเป็นการบอกตำแหน่งของชีทที่เราจะไปดึงข้อมูลมา
+// var data_table = data_sheet.getRange(2, 1, data_sheet.getLastRow(), data_sheet.getLastColumn()).getValues(); //🧿บอกขอบเขตของฐานข้อมูลที่เราจะไปดึงข้อมูลมา
+var data_table = data_sheet.getRange(2, 1, data_sheet.getLastRow() - 1, data_sheet.getLastColumn()).getValues(); 
+var result = 'ไม่พบข้อมูลที่ค้นหา';  //🧿กรณีไม่มีข้อมูลในฐานข้อมูล ให้แสดงคำว่า 'ไม่พบข้อมูลที่ค้นหา'⚠️#A1
+// ✂〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰 จบ SETTING ⬛️
+
+
+
+//「 🐸🐸🐸 ฟังก์ชั่น doPost 🐸🐸🐸 」
+function doPost(e) {
+  var json = JSON.parse(e.postData.contents);     // 🧿 เป็นการแปลข้อความ (จากภาษา JSON เป็นภาษา JavaScript)
+  var message = json.events[0].message.text;      // 🧿 เป็นการหยิบข้อความที่แปลมาเปิดอ่าน
+  var reply_token = json.events[0].replyToken;    // 🧿 เป็นการระบุว่าจะให้ส่งผลลัพธ์ส่งไปที่ไหน ในที่นี้ให้ส่งไปที่โทเค่น (Token เปรียบเสมือน ID CARD หรือ PASSPORT)
+
+  for (var i = 0; i < data_table.length; i++) {
+    if (data_table[i][0] == message) // 🧿ถ้าค่าที่ถูกส่งมามีค่าตรงกับข้อมูลใน Google Sheet แถวที่ i คอลัมน์ A 
+    // 🧿(คอลัมน์ A=0, B=1, C=2 ไล่ไปเรื่อย ๆ อยู่ที่ว่าคำที่ต้องการค้นหาอยู่คอลัมน์ไหน) 
+    {
+      i = i + 2;
+      var column_A = data_sheet.getRange(i, 1).getValue();   // 🧿เลขประจำตัวทหาร 
+      var column_B = data_sheet.getRange(i, 2).getValue();   // 🧿ยศ - ชื่อ - สกุล
+      var column_C = data_sheet.getRange(i, 3).getValue();   // 🧿ระดับ ชั้น 
+      var column_D = data_sheet.getRange(i, 4).getValue();   // 🧿เงินเดือน ค่าจ้างประจำ
+      
+      var column_F = data_sheet.getRange(i, 6).getValue();   // 🧿พ.ส.ร.(บทช.)ครั้ง3           
+      var column_G = data_sheet.getRange(i, 7).getValue();   // 🧿พ.ส.ร.(บทช.)ครั้ง4 
+      var column_H = data_sheet.getRange(i, 8).getValue();   // 🧿พ.ส.ร.(บทช.)ครั้ง2 
+      var column_I = data_sheet.getRange(i, 9).getValue();   // 🧿พ.ช.ค.ข.
+      
+      var column_K = data_sheet.getRange(i, 11).getValue();  // 🧿พ.ส.ร.(บทช.)ครั้ง1
+      var column_L = data_sheet.getRange(i, 12).getValue();  // 🧿รวมรับ
+      
+      var column_N = data_sheet.getRange(i, 14).getValue();   // 🧿กบข./ตกเบิก, กสจ./ตกเบิก
+      var column_O = data_sheet.getRange(i, 15).getValue();   // 🧿กบข.ส่วนเพิ่ม/ตกเบิก 
+      
+      var column_Q = data_sheet.getRange(i, 17).getValue();   // 🧿งก.กยศ.พรบ60 
+            
+      var column_S = data_sheet.getRange(i, 19).getValue();   // 🧿ค่าหุ้นสหกรณ์ฯ 
+      var column_T = data_sheet.getRange(i, 20).getValue();   // 🧿กู้ สหกรณ์ออมทรัพย์
+      
+      var column_Z = data_sheet.getRange(i, 26).getValue();   // 🧿อทบ.ฝาก
+      var column_AA = data_sheet.getRange(i, 27).getValue();   // 🧿อทบ.ฝากสมทบ
+      var column_AB = data_sheet.getRange(i, 28).getValue();   // 🧿อทบ.บำบัดทุกข์
+     
+      var column_AJ = data_sheet.getRange(i, 36).getValue();  // 🧿ค่าน้ำประปา
+      
+      var column_AL = data_sheet.getRange(i, 38).getValue();   // 🧿ค่าไฟฟ้าบ้านพัก
+      var column_AM = data_sheet.getRange(i, 39).getValue();   // 🧿ฌาปนกิจ ทบ. 
+      
+      var column_AT = data_sheet.getRange(i, 46).getValue();  // 🧿UBC
+      
+      var column_BG = data_sheet.getRange(i, 59).getValue();   // 🧿ขยะ
+      
+      var column_BL = data_sheet.getRange(i, 64).getValue();   // 🧿รวมหนี้สินทั้งสิ้น
+      var column_BM = data_sheet.getRange(i, 65).getValue();   // 🧿คงเหลือ
+      
+      var column_BO = data_sheet.getRange(i, 67).getValue();   // 🧿ประจำเดือน  
+
+      
+      result =
+
+      /* ▰▱▰▱▰▱▰▱ 🌔 เริ่มต้น Flex-simulator (🚩START) 🌔 ▰▱▰▱▰▱▰▱ */
+
+      {
+        "type": "bubble",
+        "size": "giga",
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "contents": [
+            {
+              "type": "text",
+              "text": column_BO, 
+              "weight": "bold",
+              "color": "#FFCC00",
+              "size": "sm"
+            },
+            {
+              "type": "text",
+              "text": column_B,
+              "weight": "bold",
+              "size": "xl",
+              "margin": "md"
+            },
+            {
+              "type": "text",
+              "text": column_A,
+              "size": "xs",
+              "color": "#aaaaaa",
+              "wrap": true
+            },
+            {
+              "type": "separator",
+              "margin": "xxl"
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "margin": "xxl",
+              "spacing": "sm",
+              "contents": [
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "ระดับ/ชั้น",
+                      "size": "md",
+                      "color": "#555555",
+                      "weight": "bold"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_C,
+                      "color": "#111111",
+                      "align": "end",
+                      "size": "md",
+                      "weight": "bold"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "เงินเดือน ค่าจ้างประจำ",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_D,
+                      "size": "sm",
+                      "color": "#00FF00",
+                      "align": "end"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "margin": "none",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "พ.ส.ร.(บทช.)ครั้ง 1",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_K,
+                      "size": "sm",
+                      "color": "#00FF00",
+                      "align": "end"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "พ.ส.ร.(บทช.)ครั้ง 2",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_H,
+                      "size": "sm",
+                      "color": "#00FF00",
+                      "align": "end"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "พ.ส.ร.(บทช.)ครั้ง 3",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_F,
+                      "size": "sm",
+                      "color": "#00FF00",
+                      "align": "end"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "พ.ส.ร.(บทช.)ครั้ง 4 ",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_G,
+                      "size": "sm",
+                      "color": "#00FF00",
+                      "align": "end"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "พ.ช.ค.ข.",
+                      "size": "sm",
+                      "color": "#555555"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_I,
+                      "align": "end",
+                      "size": "sm",
+                      "color": "#555555"
+                    }
+                  ]
+                },
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "รวมรับ",
+                      "color": "#555555",
+                      "size": "md",
+                      "weight": "bold"
+                    },
+                    {
+                      "type": "text",
+                      "text": column_L,
+                      "align": "end",
+                      "color": "#00FF00",
+                      "size": "md",
+                      "weight": "bold"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "separator",
+              "margin": "sm"
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "size": "sm",
+                  "color": "#555555",
+                  "text": "กบข./ตกเบิก, กสจ./ตกเบิก"
+                },
+                {
+                  "type": "text",
+                  "text": column_N,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ],
+              "margin": "lg"
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "กบข.ส่วนเพิ่ม/ตกเบิก ",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_O,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "งก.กยศ.พรบ.60 ",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_Q,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "อทบ.ฝาก",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_Z,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "อทบ.ฝากสมทบ",
+                  "color": "#555555",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": column_AA,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ขยะ",
+                  "color": "#555555",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": column_BG,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "อทบ.บำบัดทุกข์",
+                  "color": "#555555",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": column_AB,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ฌาปนกิจ ทบ.",
+                  "color": "#555555",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": column_AM,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "UBC",
+                  "color": "#555555",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": column_AT,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "กู้ สหกรณ์ออมทรัพย์",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_T,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ค่าน้ำประปา",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_AJ,
+                  "align": "end",
+                  "color": "#FF0000",
+                  "size": "sm"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ค่าไฟฟ้าบ้านพัก",
+                  "size": "sm",
+                  "color": "#555555"
+                },
+                {
+                  "type": "text",
+                  "text": column_AL,
+                  "color": "#FF0000",
+                  "size": "sm",
+                  "align": "end"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "ค่าหุ้นสหกรณ์ฯ ",
+                  "size": "sm",
+                  "color": "#555555",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": column_S,
+                  "size": "sm",
+                  "color": "#FF0000",
+                  "align": "end"
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "รวม",
+                  "size": "md",
+                  "color": "#555555",
+                  "flex": 0,
+                  "weight": "bold"
+                },
+                {
+                  "type": "text",
+                  "text": column_BL,
+                  "size": "md",
+                  "color": "#FF0000",
+                  "align": "end",
+                  "weight": "bold"
+                }
+              ],
+              "margin": "md"
+            },
+            {
+              "type": "box",
+              "layout": "horizontal",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "คงเหลือ",
+                  "size": "lg",
+                  "weight": "bold"
+                },
+                {
+                  "type": "text",
+                  "text": column_BM ,
+                  "color": "#00FF00",
+                  "size": "lg",
+                  "weight": "bold",
+                  "align": "end"
+                }
+              ]
+            }
+          ],
+          "borderColor": "#FFCC00",
+          "borderWidth": "normal"
+        },
+        "footer": {
+          "type": "box",
+          "layout": "vertical",
+          "contents": [
+            {
+              "type": "button",
+              "action": {
+                "type": "uri",
+                "label": "ใบแจ้งรับเงินเดือน",
+                "uri": "http://linecorp.com/"
+              },
+              "margin": "none",
+              "style": "primary",
+              "color": "#FFCC00"
+            }
+          ]
+        },
+        "styles": {
+          "footer": {
+            "separator": true
+          }
+        }
+      }
+      /* ▰▱▰▱▰▱▰▱ 🌒 สิ้นสุด Flex-simulator (🏴󠁧󠁢󠁥󠁮󠁧󠁿STOP)  🌒 ▰▱▰▱▰▱▰▱ */
+    };
+  };
+
+
+  if (result == 'ไม่พบข้อมูลที่ค้นหา') { //🧿คำที่ต้องการให้แสดงผลเมื่อไม่มีข้อมลในฐาน ⚠️#A1
+    UrlFetchApp.fetch(line_endpoint, {
+      'headers': {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': 'Bearer ' + CHANNEL_ACCESS_TOKEN,
+      },
+      'method': 'post',
+      'payload': JSON.stringify({
+        'replyToken': reply_token,
+        'messages': [{
+          'type': 'text',
+          'text': result
+        }],
+      }),
+    });
+  }
+  else {
+    UrlFetchApp.fetch(line_endpoint, {
+      'headers': {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': 'Bearer ' + CHANNEL_ACCESS_TOKEN,
+      },
+      'method': 'post',
+      'payload': JSON.stringify({
+        'replyToken': reply_token,
+        'messages': [{
+          'type': 'flex',
+          'altText': 'ใบแจ้งรับเงินเดือนของคุณ',
+          'contents': result
+        }],
+      }),
+    });
+  }
+  return ContentService.createTextOutput(JSON.stringify({ 'content': 'post ok' })).setMimeType(ContentService.MimeType.JSON);
+  //🧿เป็นการสร้าง Output เป็นข้อความ และส่งข้อความกลับไปเป็น JSON
+}
+// ✂〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰 จบฟังก์ชั่น doPost ⬛️
+
