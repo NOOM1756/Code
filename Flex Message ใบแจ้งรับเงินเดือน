@@ -62,13 +62,15 @@ function doPost(e) {
       var column_BL = data_sheet.getRange(i, 64).getValue();   // 🧿รวมหนี้สินทั้งสิ้น
       var column_BM = data_sheet.getRange(i, 65).getValue();   // 🧿คงเหลือ
       
-      var column_BO = data_sheet.getRange(i, 67).getValue();   // 🧿ประจำเดือน  
+      var column_BN = data_sheet.getRange(i, 66).getValue();   // 🧿ประจำเดือน  
 
-      
+      // var date = new Date(column_F);                                       // 🧿เป็นการแก้ปัญหาการแสดงผลวันที่ใน flex (บางเครื่องอาจจะไม่พบปัญหานี้)
+      //     date.setDate(date.getDate() + 1);                                // 🧿เป็นการแก้ปัญหาการแสดงผลวันที่ใน flex (บางเครื่องอาจจะไม่พบปัญหานี้)
+      // var formattedDate = Utilities.formatDate(date, "GMT", "dd/MM/yyyy"); // 🧿เป็นการแก้ปัญหาการแสดงผลวันที่ใน flex (บางเครื่องอาจจะไม่พบปัญหานี้)
+
       result =
 
       /* ▰▱▰▱▰▱▰▱ 🌔 เริ่มต้น Flex-simulator (🚩START) 🌔 ▰▱▰▱▰▱▰▱ */
-
       {
         "type": "bubble",
         "size": "giga",
@@ -78,26 +80,29 @@ function doPost(e) {
           "contents": [
             {
               "type": "text",
-              "text": column_BO, 
+              "text": "ใบแจ้งรับเงินเดือน",
               "weight": "bold",
-              "color": "#FFCC00",
-              "size": "sm"
+              "color": "#1DB446",
+              "size": "xl",
+              "align": "center"
+            },
+            {
+              "type": "text",
+              "text": "ประจำเดือน "+column_BN,
+              "weight": "bold",
+              "color": "#1DB446",
+              "size": "md",
+              "align": "center"
             },
             {
               "type": "text",
               "text": column_B,
               "weight": "bold",
-              "size": "xl",
-              "margin": "md"
+              "color": "#330099",
+              "size": "xxl",
+              "align": "center"
             },
-            {
-              "type": "text",
-              "text": column_A,
-              "size": "xs",
-              "color": "#aaaaaa",
-              "wrap": true
-            },
-            {
+                        {
               "type": "separator",
               "margin": "xxl"
             },
@@ -239,7 +244,7 @@ function doPost(e) {
                       "text": column_I,
                       "align": "end",
                       "size": "sm",
-                      "color": "#555555"
+                      "color": "#00FF00"
                     }
                   ]
                 },
@@ -525,7 +530,7 @@ function doPost(e) {
               "contents": [
                 {
                   "type": "text",
-                  "text": "รวม",
+                  "text": "รวมหนี้สินทั้งสิ้น",
                   "size": "md",
                   "color": "#555555",
                   "flex": 0,
