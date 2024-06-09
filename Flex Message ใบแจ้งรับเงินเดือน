@@ -62,7 +62,8 @@ function doPost(e) {
       var column_BL = data_sheet.getRange(i, 64).getValue();   // 🧿รวมหนี้สินทั้งสิ้น
       var column_BM = data_sheet.getRange(i, 65).getValue();   // 🧿คงเหลือ
       
-      var column_BN = data_sheet.getRange(i, 66).getValue();   // 🧿ประจำเดือน  
+      var column_BN = data_sheet.getRange(i, 66).getValue();   // 🧿ประจำเดือน
+      var column_BO = data_sheet.getRange(i, 67).getValue();   // 🧿ลิ้งค์ PDF  
 
       // var date = new Date(column_F);                                       // 🧿เป็นการแก้ปัญหาการแสดงผลวันที่ใน flex (บางเครื่องอาจจะไม่พบปัญหานี้)
       //     date.setDate(date.getDate() + 1);                                // 🧿เป็นการแก้ปัญหาการแสดงผลวันที่ใน flex (บางเครื่องอาจจะไม่พบปัญหานี้)
@@ -78,6 +79,21 @@ function doPost(e) {
           "type": "box",
           "layout": "vertical",
           "contents": [
+             {
+        "type": "image",
+        "url": "https://img5.pic.in.th/file/secure-sv1/-131c63572331db649.jpg",
+        "size": "full",
+        "aspectMode": "cover",
+        "gravity": "center",
+        "position": "absolute",
+        "margin": "none",
+        "aspectRatio": "8:14",
+        "backgroundColor": "#B8860B",
+        "offsetBottom": "none",
+        "offsetTop": "none",
+        "offsetStart": "none",
+        "offsetEnd": "none"
+      },
             {
               "type": "text",
               "text": "ใบแจ้งรับเงินเดือน",
@@ -580,11 +596,18 @@ function doPost(e) {
               "action": {
                 "type": "uri",
                 "label": "ใบแจ้งรับเงินเดือน",
-                "uri": "http://linecorp.com/"
+                "uri": column_BO,
               },
               "margin": "none",
               "style": "primary",
               "color": "#FFCC00"
+            },
+            {
+              "type": "text",
+              "text": "ฝ่ายการเงิน กองพันทหารปืนใหญ่ที่ 5",
+              "align": "center",
+              "size": "xs",
+              "margin": "xxl"
             }
           ]
         },
