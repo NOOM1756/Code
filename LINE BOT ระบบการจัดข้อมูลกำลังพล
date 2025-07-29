@@ -1,4 +1,4 @@
-const CHANNEL_ACCESS_TOKEN = 'vIEUNtpM9q8BDCsiqyC68bVXHFpXOCEt5MjnEk59RL2lnlifGAdjlh9Lb7dKdQIIrA1+ACz+0nTYvEccdtIH3z9Rm0FhhmOQBlW6ei2D7tZJN3sUIymiodyoPYV1p1EldqotAXQu3R/O5NcQ9daTYgdB04t89/1O/w1cDnyilFU=';
+const CHANNEL_ACCESS_TOKEN = 'EPBJJggoQoK+1SUSX/27FdhoSSPNGe+ibcKKqw9XMli6DTweg3Wf1qseTlVJsULBrA1+ACz+0nTYvEccdtIH3z9Rm0FhhmOQBlW6ei2D7tbX+bjN91GPtL2MF4pW5pRAavQ/DtmZPPnAzhCdYQzq4wdB04t89/1O/w1cDnyilFU=';
 
 function doPost(e) {
   const event = JSON.parse(e.postData.contents).events[0];
@@ -376,9 +376,8 @@ function handleViewAllChildren(e) {
     // Columns: เลขประจำตัวทหาร, ชื่อ-สกุลบุตร, วันเกิด, อายุ, ระดับการศึกษา, ระดับชั้น, ชื่อสถานศึกษา, ผลการเรียน
     message += `${index + 1}. ${child[1]}\n`; // ชื่อ-สกุลบุตร
     message += `    📅 เกิด: ${child[2]} (อายุ ${child[3]} ปี)\n`; // วันเกิด, อายุ
-    message += `    🎓 การศึกษา: ${child[4]}\n`; // ระดับการศึกษา
-    message += `    🎓 ระดับชั้น: ${child[5]}\n`; // ระดับชั้น
-    message += `    🏫 สถานศึกษา: ${child[6]}\n`; // ชื่อสถานศึกษา
+    message += `    🎓 การศึกษา: ${child[4]} ${child[5]}\n`; // ระดับการศึกษา, ระดับชั้น
+    message += `    🏫 ${child[6]}\n`; // ชื่อสถานศึกษา
     message += `    📊 ผลการเรียน: ${child[7]}\n\n`; // ผลการเรียน
   });
 
@@ -936,21 +935,33 @@ function handleCommandChildInfo(e) {
 }
 
 /**
- * ฟังก์ชันสำหรับส่ง Flex Message ข้อมูลบุตร
- * @param {string} userId - LINE User ID
- * @param {string} name - ชื่อ-สกุล บุตร
- * @param {string} birthdate - วันเกิดบุตร (พ.ศ.)
- * @param {string} age - อายุบุตร
- * @param {string} educationLevel - ระดับการศึกษา
- * @param {string} grade - ระดับชั้น
- * @param {string} school - ชื่อสถานศึกษา
- * @param {string} result - ผลการเรียน
+ * แสดงข้อมูลบุตรของฉันในรูปแบบ Flex Message
+ * @param {object} e - Event object จาก LINE
  */
-function sendFlexChildInfo(userId, name, birthdate, age, educationLevel, grade, school, result) {
+function handleCommandChildInfo(e) {
+  const userId = e.source.userId;
+  const militaryId = getUserMilitaryId(userId);
+  if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+  const childSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลบุตร-ธิดา');
+  const children = childSheet.getDataRange().getValues().slice(1).filter(row => row[0] == militaryId);
+
+  if (children.length === 0) return sendReply(userId, '📭 ไม่มีข้อมูลบุตรที่เชื่อมกับบัญชีนี้');
+
+  children.forEach(child => {
+    // ส่งข้อมูลบุตรแต่ละคนเป็น Flex Message
+    sendFlexChildInfo(userId, child[1], child[3], child[6], child[5], child[7]);
+  });
+}
+
+/**
+ * ฟังก์ชันสำหรับส่ง Flex Message ข้อมูลบุตร
+ * (คุณอาจต้องการปรับปรุง Flex Message นี้ให้สวยงามขึ้นเช่นกัน)
+ */
+function sendFlexChildInfo(userId, name, age, school, grade, result) {
   const flex = {
     type: "bubble",
-    size: "giga", // ใช้ขนาด giga เพื่อให้มีพื้นที่แสดงข้อมูลมากขึ้น
-    header: {
+    body: {
       type: "box",
       layout: "vertical",
       contents: [
@@ -958,198 +969,155 @@ function sendFlexChildInfo(userId, name, birthdate, age, educationLevel, grade, 
           type: "text",
           text: "👶 ข้อมูลบุตร",
           weight: "bold",
-          color: "#ffffff",
+          color: "#007bff",
           size: "lg",
           align: "center"
-        }
-      ],
-      backgroundColor: "#42A5F5", // สีฟ้าสดใส
-      paddingAll: "md"
-    },
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "md",
-      paddingAll: "xl",
-      contents: [
-        {
-          type: "box",
-          layout: "horizontal",
-          contents: [
-            {
-              type: "text",
-              text: "👧👦", // Icon
-              size: "xl",
-              flex: 0
-            },
-            {
-              type: "text",
-              text: name || 'ไม่ระบุชื่อ',
-              weight: "bold",
-              size: "xl",
-              margin: "sm",
-              flex: 1,
-              wrap: true,
-              color: "#333333"
-            }
-          ]
         },
         {
           type: "separator",
-          margin: "lg",
-          color: "#E0E0E0"
+          margin: "md"
         },
-        createKeyValueBox("🎂 วันเกิด", birthdate || 'ไม่ระบุ'),
-        createKeyValueBox("⏳ อายุ", `${age || 'ไม่ระบุ'} ปี`),
-        createKeyValueBox("🎓 ระดับการศึกษา", educationLevel || 'ไม่ระบุ'),
-        createKeyValueBox("🏫 สถานศึกษา", school || 'ไม่ระบุ'),
-        createKeyValueBox("📊 ระดับชั้น", grade || 'ไม่ระบุ'),
-        createKeyValueBox("⭐ ผลการเรียน", result || 'ไม่ระระบุ')
-      ]
-    },
-    footer: {
-      type: "box",
-      layout: "vertical",
-      spacing: "sm",
-      contents: [
         {
           type: "text",
-          text: "ข้อมูลบุตรอัปเดตล่าสุด",
-          size: "xxs",
-          color: "#999999",
-          align: "center"
+          text: `ชื่อ: ${name}`,
+          size: "md",
+          wrap: true
+        },
+        {
+          type: "text",
+          text: `อายุ: ${age} ปี`,
+          size: "sm",
+          color: "#666666"
+        },
+        {
+          type: "text",
+          text: `สถานศึกษา: ${school}`,
+          size: "sm",
+          color: "#666666",
+          wrap: true
+        },
+        {
+          type: "text",
+          text: `ระดับชั้น: ${grade}`,
+          size: "sm",
+          color: "#666666"
+        },
+        {
+          type: "text",
+          text: `ผลการเรียน: ${result}`,
+          size: "sm",
+          color: "#666666"
         }
-      ],
-      flex: 0,
-      paddingAll: "md"
+      ]
     }
   };
   sendFlex(userId, flex);
 }
 
-
 /**
- * แสดงข้อมูลกำลังพลของฉันในรูปแบบ Flex Message
- * @param {object} e - Event object จาก LINE
+ * ปรับปรุงฟังก์ชันจัดการข้อมูลกำลังพล
  */
 function handleCommandPersonnelInfo(e) {
   const userId = e.source.userId;
-  const militaryId = getUserMilitaryId(userId); // ดึงเลขประจำตัวทหารจากชีท LOGIN
-  if (!militaryId) {
-    // ถ้าไม่พบ militaryId ให้แจ้งผู้ใช้
-    return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน หรือตรวจสอบว่ามีเลขประจำตัวทหารในระบบแล้วหรือไม่');
-  }
+  const militaryId = getUserMilitaryId(userId);
+  if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
 
-  const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
-  const pData = personnelSheet.getDataRange().getValues().slice(1);
+  try {
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    const pData = personnelSheet.getDataRange().getValues();
 
-  let foundPersonnel = false;
-  for (let i = 0; i < pData.length; i++) { // วนลูปตั้งแต่ Index 0 เพราะ slice(1) แล้ว
-    const data = pData[i];
-    // ตรวจสอบคอลัมน์เลขทหาร (Index 5 หรือคอลัมน์ F)
-    if (String(data[5]).trim() === String(militaryId).trim()) {
-      foundPersonnel = true;
-
-      // ดึง URL รูปภาพจากคอลัมน์ที่ 18 (index 17)
-      const imageUrl = data[17] ? String(data[17]).trim() : "https://img5.pic.in.th/file/secure-sv1/-199a79ca217285bdf.jpg"; // URL รูปภาพสำรอง
-
-      const flex = {
-        type: "bubble",
-        size: "giga",
-        header: {
-          type: "box",
-          layout: "vertical",
-          contents: [
-            {
-              type: "text",
-              text: "🪖 ข้อมูลกำลังพล",
-              weight: "bold",
-              color: "#ffffff",
-              size: "xl",
-              align: "center"
-            }
-          ],
-          backgroundColor: "#1DB446", // สีเขียวทหาร
-          paddingAll: "md"
-        },
-        hero: {
-          type: "image",
-          url: imageUrl,
-          size: "full",
-          aspectRatio: "1:1",
-          aspectMode: "cover",
-          cornerRadius: "100px",
-          margin: "xl",
-          align: "center",
-          gravity: "center"
-        },
-        body: {
-          type: "box",
-          layout: "vertical",
-          spacing: "md",
-          paddingAll: "xl",
-          contents: [
-            {
-              type: "text",
-              text: `${data[1]} ${data[2]} ${data[3]}`, // ยศ ชื่อ สกุล (Index 1, 2, 3)
-              weight: "bold",
-              size: "xl",
-              align: "center",
-              margin: "md",
-              color: "#333333"
-            },
-            {
-              type: "separator",
-              margin: "lg",
-              color: "#eeeeee"
-            },
-            // ข้อมูลรายละเอียดในรูปแบบ Key-Value
-            createKeyValueBox("📌 กองร้อย", data[0] || 'N/A'),
-            createKeyValueBox("🆔 หมายเลข ปชช.", data[4] || 'N/A'),
-            createKeyValueBox("🪖 หมายเลขทหาร", data[5] || 'N/A'),
-            createKeyValueBox("📍 สังกัด", data[6] || 'N/A'),
-            createKeyValueBox("🎖️ ตำแหน่ง", data[7] || 'N/A'),
-            createKeyValueBox("🔰 เหล่า", data[8] || 'N/A'),
-            createKeyValueBox("🏠 กำเนิด", data[9] || 'N/A'),
-            createKeyValueBox("🎂 วันเกิด", data[10] || 'N/A'),
-            createKeyValueBox("⏳ อายุ", `${data[11] || 'N/A'} ปี`),
-            createKeyValueBox("🗓️ วันขึ้นทะเบียน", data[12] || 'N/A'),
-            createKeyValueBox("🗓️ วันที่บรรจุ", data[13] || 'N/A'),
-            createKeyValueBox("🗓️ วันที่ครองยศ", data[14] || 'N/A'),
-            createKeyValueBox("💰 เงินเดือนปัจจุบัน", data[15] || 'N/A'),
-            createKeyValueBox("📆 ปีเกษียณ", data[16] || 'N/A')
-          ]
-        },
-        footer: {
-          type: "box",
-          layout: "vertical",
-          spacing: "sm",
-          contents: [
-            {
-              type: "button",
-              style: "link",
-              height: "sm",
-              action: {
-                type: "uri",
-                label: "ดูข้อมูลบุตร",
-                uri: "line://oaMessage/?_text=/ข้อมูลบุตรของฉัน" // ตัวอย่างลิงก์ไปคำสั่งอื่น
+    for (let i = 1; i < pData.length; i++) {
+      if (String(pData[i][5]).trim() === String(militaryId).trim()) {
+        const data = pData[i];
+        const imageUrl = data[17] || 'https://via.placeholder.com/150x150/4CAF50/white?text=No+Image';
+        
+        const flex = {
+          type: "bubble",
+          size: "giga",
+          body: {
+            type: "box",
+            layout: "vertical",
+            contents: [
+              {
+                type: "image",
+                url: imageUrl,
+                size: "full",
+                aspectMode: "cover",
+                aspectRatio: "1:1",
+                gravity: "center"
+              },
+              {
+                type: "box",
+                layout: "vertical",
+                spacing: "sm",
+                paddingAll: "lg",
+                contents: [
+                  {
+                    type: "text",
+                    text: "🪖 ข้อมูลกำลังพล",
+                    weight: "bold",
+                    color: "#1DB446",
+                    size: "lg",
+                    align: "center"
+                  },
+                  {
+                    type: "separator",
+                    margin: "md"
+                  },
+                  {
+                    type: "text",
+                    text: `${data[1] || ''} ${data[2] || ''} ${data[3] || ''}`,
+                    weight: "bold",
+                    size: "lg",
+                    align: "center",
+                    margin: "md"
+                  },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    margin: "md",
+                    spacing: "xs",
+                    contents: [
+                      { type: "text", text: `📌 กองร้อย : ${data[0] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🆔 หมายเลข ปชช. : ${data[4] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🪖 หมายเลขทหาร : ${data[5] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `📍 สังกัด : ${data[6] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🎖️ ตำแหน่ง : ${data[7] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🔰 เหล่า : ${data[8] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🏠 กำเนิด : ${data[9] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🎂 วันเกิด : ${data[10] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `⏳ อายุ : ${data[11] || 'ไม่ระบุ'} ปี`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันขึ้นทะเบียน : ${data[12] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันที่บรรจุ : ${data[13] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันที่ครองยศ : ${data[14] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `💰 เงินเดือนปัจจุบัน : ${data[15] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `📆 ปีเกษียณ : ${data[16] || 'ไม่ระบุ'}`, size: "sm", wrap: true }
+                    ]
+                  }
+                ]
               }
+            ]
+          },
+          styles: {
+            body: {
+              separator: true
             }
-          ],
-          flex: 0,
-          paddingAll: "md"
-        }
-      };
-      sendFlex(userId, flex);
-      return; // เมื่อเจอข้อมูลแล้ว ให้หยุดการทำงาน
+          }
+        };
+        
+        sendFlex(userId, flex);
+        return;
+      }
     }
-  }
-
-  // ถ้าวนลูปจนจบแล้วยังไม่พบข้อมูล
-  if (!foundPersonnel) {
-    sendReply(userId, '📭 ไม่พบข้อมูลกำลังพลที่ตรงกันในระบบ กรุณาตรวจสอบเลขประจำตัวทหาร หรือติดต่อผู้ดูแลระบบ');
+    
+    sendReply(userId, '📭 ไม่พบข้อมูลกำลังพลที่ตรงกัน\n\nกรุณาตรวจสอบการลงทะเบียนหรือติดต่อผู้ดูแลระบบ');
+    
+  } catch (error) {
+    Logger.log(`Error in handleCommandPersonnelInfo: ${error.message}`);
+    sendReply(userId, '❌ เกิดข้อผิดพลาดในการดึงข้อมูลกำลังพล');
   }
 }
+
 
 /**
  * Helper function เพื่อสร้าง Box สำหรับแสดงข้อมูล Key-Value
