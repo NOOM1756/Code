@@ -962,6 +962,53 @@ function handleViewAllPersonnel(e) {
   }
 }
 
+// 📋 ฟังก์ชันสำหรับค้นหากำลังพล (ที่หายไป)
+function handleSearchPersonnel(userId, text) {
+  try {
+    // ตรวจสอบสิทธิ์การใช้งาน (อาจจะให้ใช้ได้ทุกคน หรือเฉพาะแอดมิน)
+    // หากต้องการให้แอดมินใช้เท่านั้น ให้เปิดใช้งานบรรทัดด้านล่าง
+    // if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้');
+
+    const keyword = text.replace('/ค้นหากำลังพล ', '').trim().toLowerCase();
+    if (!keyword) {
+      return sendReply(userId, '❗ โปรดระบุชื่อ, สกุล, หรือเลขทหารที่ต้องการค้นหา\nตัวอย่าง: /ค้นหากำลังพล สมชาย');
+    }
+
+    const personnelData = getSpreadsheetData('ข้อมูลกำลังพล');
+    if (!personnelData || personnelData.length <= 1) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลกำลังพลในระบบ');
+    }
+
+    const results = personnelData.slice(1).filter(person => {
+      // ค้นหาจาก ยศ, ชื่อ, สกุล, และเลขทหาร
+      const searchableText = `${person[1] || ''} ${person[2] || ''} ${person[3] || ''} ${person[5] || ''}`.toLowerCase();
+      return searchableText.includes(keyword);
+    });
+
+    if (results.length === 0) {
+      return sendReply(userId, `❌ ไม่พบข้อมูลกำลังพลที่ตรงกับคำว่า "${keyword}"`);
+    }
+
+    let message = `✅ พบข้อมูลกำลังพลที่เกี่ยวข้อง ${results.length} นาย:\n\n`;
+    // แสดงผลลัพธ์สูงสุด 10 คนเพื่อไม่ให้ข้อความยาวเกินไป
+    results.slice(0, 10).forEach((person, index) => {
+      message += `${index + 1}. ${person[1] || ''} ${person[2] || ''} ${person[3] || ''}\n`;
+      message += `   - เลขทหาร: ${person[5] || 'ไม่มี'}\n`;
+      message += `   - ตำแหน่ง: ${person[7] || 'ไม่มี'}\n\n`;
+    });
+
+    if (results.length > 10) {
+      message += `... และอีก ${results.length - 10} คน`;
+    }
+
+    sendReply(userId, message);
+
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการค้นหากำลังพล: ${e.message}`);
+    Logger.log(`Error in handleSearchPersonnel: ${e.message}`);
+  }
+}
+
 function handleCommandChildInfo(e) {
   try {
     const userId = e.source.userId;
