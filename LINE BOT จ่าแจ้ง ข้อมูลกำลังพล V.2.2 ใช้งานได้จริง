@@ -993,8 +993,12 @@ function handleSearchPersonnel(userId, text) {
     // แสดงผลลัพธ์สูงสุด 10 คนเพื่อไม่ให้ข้อความยาวเกินไป
     results.slice(0, 10).forEach((person, index) => {
       message += `${index + 1}. ${person[1] || ''} ${person[2] || ''} ${person[3] || ''}\n`;
-      message += `   - เลขทหาร: ${person[5] || 'ไม่มี'}\n`;
-      message += `   - ตำแหน่ง: ${person[7] || 'ไม่มี'}\n\n`;
+      message += `   - ตำแหน่ง: ${person[7] || 'ไม่มี'}\n`;
+      message += `   - เลขทหาร: ${person[5] || 'ไม่มี'}\n`;
+      message += `   - เลข ปชช.: ${person[4] || 'ไม่มี'}\n`;
+      message += `   - วันเกิด: ${person[10] || 'ไม่มี'}\n`;
+      message += `   - อายุ: ${person[11] || 'ไม่มี'}\n`;
+      message += `   - เงินเดือน: ${person[15] || 'ไม่มี'}\n\n`;
     });
 
     if (results.length > 10) {
