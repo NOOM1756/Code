@@ -1,0 +1,1843 @@
+const CHANNEL_ACCESS_TOKEN = 'wPE1mSEtWD8ksUlDEFnFRIf+PzVxaLSu0JIC7TrnV1d0iTsYDdKBep59Fg+alB7Q81jaC9xW4SFq75b+5CEvVsl/07NXXecUYG/tGeVvEui4Wjm8CBU4+k/Yrw+a/poAvFEh4QrURtqQ+I88d+K9ngdB04t89/1O/w1cDnyilFU=';
+const PROFILE_PICTURE_FOLDER_NAME = 'LINE_Bot_Profile_Pictures';
+const COMMAND_FILES_FOLDER_NAME = 'LINE_Bot_Command_Files';
+
+// Global cache for spreadsheet data
+const CACHE_EXPIRATION_SECONDS = 300; // 5 minutes
+
+function doPost(e) {
+  try {
+    const event = JSON.parse(e.postData.contents).events[0];
+    const userId = event.source.userId;
+
+    // Log the incoming message for debugging purposes
+    Logger.log(`Received message from user: ${userId}, type: ${event.type}`);
+    if (event.type === 'message' && event.message.type === 'text') {
+      Logger.log(`Message text: ${event.message.text}`);
+    }
+
+    if (event.type === 'message') {
+      if (event.message.type === 'text') {
+        const text = event.message.text.trim();
+
+        if (text.startsWith('ลงทะเบียน')) handleRegistration(userId, text);
+        else if (text === '/ข้อมูลบุตรของฉัน') handleCommandChildInfo(event);
+        else if (text === '/ข้อมูลภรรยาของฉัน') handleCommandWifeInfo(event);
+        else if (text === '/ข้อมูลกำลังพลของฉัน') handleCommandPersonnelInfo(event);
+        else if (text.startsWith('/ตั้งรูปโปรไฟล์ ')) handleSetProfilePicture(userId, text);
+        else if (text === '/เวรของฉัน') handleCommandDutyToday(event);
+        else if (text === '/เวรประจำเดือน') handleMonthlyDuty(event);
+        else if (text === '/เวรย้อนหลัง') handlePastDuties(event);
+        else if (text.startsWith('/เพิ่มกำลังพล ')) handleAddPersonnel(userId, text);
+        else if (text.startsWith('/แก้ไขกำลังพล ')) handleEditPersonnel(userId, text);
+        else if (text.startsWith('/ลบกำลังพล ')) handleDeletePersonnel(userId, text);
+        else if (text === '/ดูข้อมูลกำลังพลทั้งหมด') handleViewAllPersonnel(event);
+        else if (text.startsWith('/เพิ่มบุตร ')) handleAddChild(userId, text);
+        else if (text.startsWith('/แก้ไขบุตร ')) handleEditChild(userId, text);
+        else if (text.startsWith('/ลบบุตร ')) handleDeleteChild(userId, text);
+        else if (text === '/ดูข้อมูลบุตรทั้งหมด') handleViewAllChildren(event);
+        else if (text.startsWith('/เพิ่มภรรยา ')) handleAddWife(userId, text);
+        else if (text.startsWith('/แก้ไขภรรยา ')) handleEditWife(userId, text);
+        else if (text.startsWith('/ลบภรรยา ')) handleDeleteWife(userId, text);
+        else if (text === '/ดูข้อมูลภรรยาทั้งหมด') handleViewAllWives(event);
+        else if (text.startsWith('/เพิ่มเวร ')) handleAddDuty(userId, text);
+        else if (text.startsWith('/แก้ไขเวร ')) handleEditDuty(userId, text);
+        else if (text.startsWith('/ลบเวร ')) handleDeleteDuty(userId, text);
+        else if (text === '/ดูข้อมูลเวรทั้งหมด') handleViewAllDuties(event);
+        else if (text.startsWith('/เพิ่มหนังสือคำสั่ง ')) handleAddCommand(userId, text);
+        else if (text.startsWith('/แก้ไขหนังสือคำสั่ง ')) handleEditCommand(userId, text);
+        else if (text.startsWith('/ลบหนังสือคำสั่ง ')) handleDeleteCommand(userId, text);
+        else if (text.startsWith('/ค้นหาหนังสือคำสั่ง ')) handleSearchCommand(userId, text);
+        else if (text.startsWith('/ลิงก์ไฟล์คำสั่ง ')) handleLinkCommandFile(userId, text);
+        else if (text === '/บุตรทั้งหมดของกองร้อย') handleCompanyChildrenReport(event);
+        else if (text === '/สรุปรายงาน') handleGenerateReport(event);
+        else if (text.startsWith('/ค้นหากำลังพล ')) handleSearchPersonnel(userId, text);
+        else if (text === '/คำสั่งทั้งหมด') handleViewAllCommands(userId);
+        else if (text === '/ช่วยเหลือ' || text === '/help') sendReply(userId, getHelpMessage());
+        else if (text === 'สวัสดี') sendReply(userId, 'สวัสดีครับ ผมคือระบบจัดการข้อมูลทหาร มีอะไรให้ช่วยไหมครับ?');
+        else if (text === 'เมนู' || text === 'กลับ') sendReply(userId, 'คุณสามารถพิมพ์ /ช่วยเหลือ เพื่อดูคำสั่งทั้งหมดได้');
+        else {
+          // Smart Help Message (ถ้าเป็นข้อความที่ไม่รู้จัก)
+          sendReply(userId, getSmartHelpMessage(text));
+        }
+
+      } else if (event.message.type === 'image' || event.message.type === 'file') {
+        handleIncomingFileOrImage(userId, event.message.id, event.message.type, event.message.fileName, event.message.contentProvider);
+      }
+    }
+  } catch (e) {
+    Logger.log(`Global Error in doPost: ${e.message}, Stack: ${e.stack}`);
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาดในระบบ: ${e.message}`);
+  }
+}
+
+/**
+ * ดึงข้อมูลจาก Google Sheets และเก็บใน Cache เพื่อลดการเรียก API
+ * @param {string} sheetName - ชื่อชีท
+ * @returns {Array<Array<any>>} ข้อมูลในชีท
+ */
+function getSpreadsheetData(sheetName) {
+  const cacheKey = `data_${sheetName}`;
+  const cachedData = CacheService.getScriptCache().get(cacheKey);
+
+  if (cachedData) {
+    Logger.log(`Cache hit for sheet: ${sheetName}`);
+    return JSON.parse(cachedData);
+  }
+
+  Logger.log(`Cache miss for sheet: ${sheetName}. Fetching from Spreadsheet.`);
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log(`Sheet "${sheetName}" not found.`);
+    return null;
+  }
+  const data = sheet.getDataRange().getValues();
+
+  CacheService.getScriptCache().put(cacheKey, JSON.stringify(data), CACHE_EXPIRATION_SECONDS);
+  return data;
+}
+
+/**
+ * ล้าง Cache สำหรับชีทที่ระบุ
+ * @param {string} sheetName - ชื่อชีท
+ */
+function clearCache(sheetName) {
+  const cacheKey = `data_${sheetName}`;
+  CacheService.getScriptCache().remove(cacheKey);
+  Logger.log(`Cache cleared for sheet: ${sheetName}`);
+}
+
+/**
+ * สร้างข้อความช่วยเหลือสำหรับผู้ใช้ LINE Bot
+ * @returns {string} ข้อความช่วยเหลือ
+ */
+function getHelpMessage() {
+  return `🤖 **ระบบจัดการข้อมูลทหาร LINE Bot**
+
+📋 **การลงทะเบียน**
+• ลงทะเบียน <เลขประจำตัวทหาร>
+
+👤 **ข้อมูลส่วนตัว**
+• /ข้อมูลกำลังพลของฉัน
+• /ข้อมูลภรรยาของฉัน
+• /ข้อมูลบุตรของฉัน
+• ส่งรูปภาพ แล้วพิมพ์ /ตั้งรูปโปรไฟล์ <เลขประจำตัวทหาร>
+
+⏰ **ระบบเวรยาม**
+• /เวรของฉัน - ดูเวรวันนี้
+• /เวรประจำเดือน - ดูเวรทั้งเดือน
+• /เวรย้อนหลัง - ดูประวัติเวร
+
+📜 **หนังสือคำสั่ง**
+• /ค้นหาหนังสือคำสั่ง <คีย์เวิร์ด>
+• /คำสั่งทั้งหมด
+
+🆕 **คำสั่งสำหรับจัดการข้อมูล** (เฉพาะผู้ที่มีสิทธิ์)
+• **จัดการกำลังพล**: /เพิ่มกำลังพล, /แก้ไขกำลังพล, /ลบกำลังพล, /ดูข้อมูลกำลังพลทั้งหมด
+• **จัดการภรรยา**: /เพิ่มภรรยา, /แก้ไขภรรยา, /ลบภรรยา, /ดูข้อมูลภรรยาทั้งหมด
+• **จัดการบุตร**: /เพิ่มบุตร, /แก้ไขบุตร, /ลบบุตร, /ดูข้อมูลบุตรทั้งหมด
+• **จัดการเวรยาม**: /เพิ่มเวร, /แก้ไขเวร, /ลบเวร, /ดูข้อมูลเวรทั้งหมด
+• **จัดการหนังสือคำสั่ง**: /เพิ่มหนังสือคำสั่ง, /แก้ไขหนังสือคำสั่ง, /ลบหนังสือคำสั่ง, /ลิงก์ไฟล์คำสั่ง
+• **รายงาน**: /บุตรทั้งหมดของกองร้อย, /สรุปรายงาน
+
+💡 **คำแนะนำ:** พิมพ์ /ช่วยเหลือ เพื่อดูรายละเอียดเพิ่มเติมของแต่ละคำสั่ง`;
+}
+
+/**
+ * Smart Help Message: แนะนำคำสั่งที่เกี่ยวข้องกับคำที่ไม่รู้จัก
+ * @param {string} unknownText - ข้อความที่ผู้ใช้พิมพ์เข้ามา
+ * @returns {string} ข้อความช่วยเหลือที่เกี่ยวข้อง
+ */
+function getSmartHelpMessage(unknownText) {
+  const lowerText = unknownText.toLowerCase();
+  if (lowerText.includes('ข้อมูล')) {
+    return 'ไม่เข้าใจคำสั่งข้อมูล โปรดลองใช้: /ข้อมูลกำลังพลของฉัน, /ข้อมูลภรรยาของฉัน, /ข้อมูลบุตรของฉัน';
+  }
+  if (lowerText.includes('เวร') || lowerText.includes('ยาม')) {
+    return 'ไม่เข้าใจคำสั่งเวรยาม โปรดลองใช้: /เวรของฉัน, /เวรประจำเดือน, /เวรย้อนหลัง';
+  }
+  if (lowerText.includes('ค้นหา')) {
+    return 'ไม่เข้าใจคำสั่งค้นหา โปรดลองใช้: /ค้นหากำลังพล <ชื่อ>, /ค้นหาหนังสือคำสั่ง <คีย์เวิร์ด>';
+  }
+  if (lowerText.includes('เพิ่ม') || lowerText.includes('แก้ไข') || lowerText.includes('ลบ')) {
+    return 'ไม่เข้าใจคำสั่งจัดการข้อมูล โปรดลองใช้: /เพิ่มบุตร, /แก้ไขกำลังพล, /ลบเวร หรือดูทั้งหมดได้ที่ /ช่วยเหลือ';
+  }
+  return '❗ ไม่พบคำสั่งที่คุณต้องการ โปรดลองพิมพ์ /ช่วยเหลือ เพื่อดูคำสั่งทั้งหมด';
+}
+
+
+function sendReply(userId, text) {
+  try {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "post",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
+      },
+      payload: JSON.stringify({
+        to: userId,
+        messages: [{ type: "text", text }]
+      })
+    });
+  } catch (e) {
+    Logger.log(`Error sending reply: ${e.message}`);
+  }
+}
+
+function sendFlex(userId, flexContent) {
+  try {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "post",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
+      },
+      payload: JSON.stringify({
+        to: userId,
+        messages: [
+          {
+            type: "flex",
+            altText: "📋 รายละเอียดข้อมูล",
+            contents: flexContent
+          }
+        ]
+      })
+    });
+  } catch (e) {
+    Logger.log(`Error sending Flex message: ${e.message}`);
+  }
+}
+
+function handleRegistration(userId, text) {
+  try {
+    const loginSheet = SpreadsheetApp.getActive().getSheetByName('LOGIN');
+    if (!loginSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "LOGIN" กรุณาตรวจสอบ');
+      return;
+    }
+    const loginData = loginSheet.getDataRange().getValues();
+    const parts = text.split(' ');
+
+    if (parts.length !== 2 || parts[0] !== 'ลงทะเบียน') {
+      return sendReply(userId, '❗ โปรดพิมพ์ว่า: ลงทะเบียน <เลขประจำตัวทหาร>\nตัวอย่าง: ลงทะเบียน 1565601540');
+    }
+
+    const militaryId = parts[1];
+    let foundRowIndex = -1;
+    let alreadyUsed = false;
+
+    for (let i = 1; i < loginData.length; i++) {
+      if (loginData[i][0] === userId) {
+        foundRowIndex = i;
+      }
+      if (loginData[i][1] === militaryId) {
+        alreadyUsed = true;
+      }
+    }
+
+    if (alreadyUsed) {
+      return sendReply(userId, '❌ เลขประจำตัวทหารนี้มีผู้ใช้งานแล้ว');
+    }
+
+    if (foundRowIndex !== -1) {
+      loginSheet.getRange(foundRowIndex + 1, 2).setValue(militaryId);
+      sendReply(userId, '✅ อัปเดตเลขประจำตัวทหารเรียบร้อย');
+    } else {
+      loginSheet.appendRow([userId, militaryId]);
+      sendReply(userId, '✅ ลงทะเบียนสำเร็จ สามารถใช้คำสั่งต่างๆ ได้แล้ว');
+    }
+    clearCache('LOGIN');
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลงทะเบียน: ${e.message}`);
+    Logger.log(`Error in handleRegistration: ${e.message}`);
+  }
+}
+
+function handleAddChild(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const parts = text.replace('/เพิ่มบุตร ', '').split('|');
+    if (parts.length !== 7) {
+      return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+      
+📝 รูปแบบที่ถูกต้อง:
+/เพิ่มบุตร <ชื่อ-สกุลบุตร>|<วันเกิด(DD/MM/YYYY พ.ศ.)>|<อายุ>|<ระดับการศึกษา>|<ระดับชั้น>|<ชื่อสถานศึกษา>|<ผลการเรียน>`);
+    }
+
+    const [childName, birthdateStr, age, educationLevel, grade, school, result] = parts.map(p => p.trim());
+    const birthdate = parseThaiDateToDateObject(birthdateStr);
+    if (!birthdate) {
+      return sendReply(userId, '❗ รูปแบบวันเกิดไม่ถูกต้อง กรุณาใช้ DD/MM/YYYY (พ.ศ. เช่น 01/01/2553)');
+    }
+    const formattedBirthdate = formatDateToThaiBuddhist(birthdate);
+
+    const childSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลบุตร-ธิดา');
+    if (!childSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลบุตร-ธิดา" กรุณาตรวจสอบ');
+      return;
+    }
+    childSheet.appendRow([militaryId, childName, formattedBirthdate, age, educationLevel, grade, school, result]);
+    clearCache('ข้อมูลบุตร-ธิดา');
+    sendReply(userId, `✅ เพิ่มข้อมูลบุตร "${childName}" เรียบร้อยแล้ว`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการเพิ่มบุตร: ${e.message}`);
+    Logger.log(`Error in handleAddChild: ${e.message}`);
+  }
+}
+
+function handleEditChild(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const cleanText = text.replace('/แก้ไขบุตร ', '');
+    const parts = cleanText.split('|');
+
+    const childSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลบุตร-ธิดา');
+    if (!childSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลบุตร-ธิดา" กรุณาตรวจสอบ');
+      return;
+    }
+    const data = childSheet.getDataRange().getValues();
+
+    const childFieldMap = {
+      "ชื่อ-สกุลบุตร": 1, "วันเกิด": 2, "อายุ": 3, "ระดับการศึกษา": 4, "ระดับชั้น": 5, "ชื่อสถานศึกษา": 6, "ผลการเรียน": 7
+    };
+
+    if (parts.length === 3) {
+      const [oldChildName, fieldName, newValueRaw] = parts.map(p => p.trim());
+      const colIndex = childFieldMap[fieldName];
+      if (colIndex === undefined) {
+        return sendReply(userId, `❌ ไม่พบชื่อฟิลด์ "${fieldName}"`);
+      }
+      let newValue = newValueRaw;
+      if (fieldName === "วันเกิด") {
+        const newDate = parseThaiDateToDateObject(newValueRaw);
+        if (!newDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+        newValue = formatDateToThaiBuddhist(newDate);
+      }
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(oldChildName).trim()) {
+          childSheet.getRange(i + 1, colIndex + 1).setValue(newValue);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลบุตร "${oldChildName}" ฟิลด์ "${fieldName}" เรียบร้อยแล้ว`);
+        clearCache('ข้อมูลบุตร-ธิดา');
+      } else {
+        sendReply(userId, `❌ ไม่พบข้อมูลบุตร "${oldChildName}" ของคุณ`);
+      }
+    } else if (parts.length === 8) {
+      const [oldName, newName, birthdateStr, age, educationLevel, grade, school, result] = parts.map(p => p.trim());
+      const birthdate = parseThaiDateToDateObject(birthdateStr);
+      if (!birthdate) return sendReply(userId, '❗ รูปแบบวันเกิดไม่ถูกต้อง');
+      const formattedBirthdate = formatDateToThaiBuddhist(birthdate);
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(oldName).trim()) {
+          childSheet.getRange(i + 1, 2, 1, 7).setValues([[newName, formattedBirthdate, age, educationLevel, grade, school, result]]);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลบุตร "${oldName}" เรียบร้อยแล้ว`);
+        clearCache('ข้อมูลบุตร-ธิดา');
+      } else {
+        sendReply(userId, '❌ ไม่พบข้อมูลบุตรที่ระบุ');
+      }
+    } else {
+      sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบการแก้ไขบางฟิลด์: /แก้ไขบุตร <ชื่อ-สกุลบุตรเดิม>|<ชื่อฟิลด์>|<ค่าใหม่>
+📝 รูปแบบการแก้ไขทั้งหมด: /แก้ไขบุตร <ชื่อเดิม>|<ชื่อใหม่>|<วันเกิด(พ.ศ.)>|...`);
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการแก้ไขบุตร: ${e.message}`);
+    Logger.log(`Error in handleEditChild: ${e.message}`);
+  }
+}
+
+function handleDeleteChild(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const childName = text.replace('/ลบบุตร ', '').trim();
+    if (!childName) return sendReply(userId, '❗ รูปแบบ: /ลบบุตร <ชื่อ-สกุลบุตร>');
+
+    const childSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลบุตร-ธิดา');
+    if (!childSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลบุตร-ธิดา" กรุณาตรวจสอบ');
+      return;
+    }
+    const data = childSheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(childName).trim()) {
+        childSheet.deleteRow(i + 1);
+        clearCache('ข้อมูลบุตร-ธิดา');
+        return sendReply(userId, `✅ ลบข้อมูลบุตร "${childName}" เรียบร้อยแล้ว`);
+      }
+    }
+    sendReply(userId, '❌ ไม่พบข้อมูลบุตรที่ระบุ');
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลบบุตร: ${e.message}`);
+    Logger.log(`Error in handleDeleteChild: ${e.message}`);
+  }
+}
+
+function handleViewAllChildren(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const children = getSpreadsheetData('ข้อมูลบุตร-ธิดา')
+      .slice(1)
+      .filter(row => String(row[0]).trim() === String(militaryId).trim());
+
+    if (!children || children.length === 0) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลบุตรที่เชื่อมกับบัญชีนี้');
+    }
+
+    let message = '👶 **ข้อมูลบุตรทั้งหมด**\n\n';
+    children.forEach((child, index) => {
+      message += `${index + 1}. ${child[1]}\n`;
+      message += `  📅 เกิด: ${child[2]} (อายุ ${child[3]} ปี)\n`;
+      message += `  🎓 การศึกษา: ${child[4]} ${child[5]}\n`;
+      message += `  🏫 ${child[6]}\n`;
+      message += `  📊 ผลการเรียน: ${child[7]}\n\n`;
+    });
+    sendReply(userId, message);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleViewAllChildren: ${e.message}`);
+  }
+}
+
+// ====================================================================
+// NEW: WIFE MANAGEMENT
+// ====================================================================
+function handleAddWife(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const parts = text.replace('/เพิ่มภรรยา ', '').split('|');
+    // อัปเดตเพื่อให้รองรับ 9 ฟิลด์ (ไม่รวม militaryId)
+    if (parts.length !== 9) {
+      return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบที่ถูกต้อง:
+/เพิ่มภรรยา <ชื่อ-สกุลภรรยา>|<วันเกิด(DD/MM/YYYY พ.ศ.)>|<อายุ>|<เลขบัตร ปชช.>|<เบอร์โทร>|<กรุ๊ปเลือด>|<อาชีพ>|<ตำแหน่ง>|<สังกัด>
+ตัวอย่าง:
+/เพิ่มภรรยา สมศรี ใจดี|01/01/2530|37|1234567890123|081-999-8888|A|ค้าขาย|ผู้จัดการร้าน|ห้างสรรพสินค้า`);
+    }
+
+    const [wifeName, birthdateStr, age, nationalId, phone, bloodType, occupation, position, affiliation] = parts.map(p => p.trim());
+    const birthdate = parseThaiDateToDateObject(birthdateStr);
+    if (!birthdate) {
+      return sendReply(userId, '❗ รูปแบบวันเกิดไม่ถูกต้อง กรุณาใช้ DD/MM/YYYY (พ.ศ.)');
+    }
+    const formattedBirthdate = formatDateToThaiBuddhist(birthdate);
+
+    const wifeSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลภรรยา');
+    if (!wifeSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลภรรยา" กรุณาตรวจสอบ');
+      return;
+    }
+    // อัปเดต appendRow ให้ตรงกับคอลัมน์ใหม่
+    wifeSheet.appendRow([militaryId, wifeName, formattedBirthdate, age, nationalId, phone, bloodType, occupation, position, affiliation]);
+    clearCache('ข้อมูลภรรยา');
+    sendReply(userId, `✅ เพิ่มข้อมูลภรรยา "${wifeName}" เรียบร้อยแล้ว`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการเพิ่มภรรยา: ${e.message}`);
+    Logger.log(`Error in handleAddWife: ${e.message}`);
+  }
+}
+
+function handleEditWife(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const cleanText = text.replace('/แก้ไขภรรยา ', '');
+    const parts = cleanText.split('|');
+
+    const wifeSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลภรรยา');
+    if (!wifeSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลภรรยา" กรุณาตรวจสอบ');
+      return;
+    }
+    const data = wifeSheet.getDataRange().getValues();
+
+    // อัปเดต field map ให้ตรงกับคอลัมน์ใหม่
+    const wifeFieldMap = {
+      "ชื่อ-สกุล": 1, "วันเกิด": 2, "อายุ": 3, "เลขบัตร ปชช.": 4, "เบอร์โทร": 5, "กรุ๊ปเลือด": 6, "อาชีพ": 7, "ตำแหน่ง": 8, "สังกัด": 9
+    };
+
+    if (parts.length === 3) { // Partial update (oldWifeName|fieldName|newValue)
+      const [oldWifeName, fieldName, newValueRaw] = parts.map(p => p.trim());
+      const colIndex = wifeFieldMap[fieldName];
+      if (colIndex === undefined) return sendReply(userId, `❌ ไม่พบชื่อฟิลด์ "${fieldName}"`);
+      let newValue = newValueRaw;
+      if (fieldName === "วันเกิด") {
+        const newDate = parseThaiDateToDateObject(newValueRaw);
+        if (!newDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+        newValue = formatDateToThaiBuddhist(newDate);
+      }
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(oldWifeName).trim()) {
+          wifeSheet.getRange(i + 1, colIndex + 1).setValue(newValue);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลภรรยา "${oldWifeName}" ฟิลด์ "${fieldName}" เรียบร้อยแล้ว`);
+        clearCache('ข้อมูลภรรยา');
+      } else {
+        sendReply(userId, `❌ ไม่พบข้อมูลภรรยา "${oldWifeName}" ของคุณ`);
+      }
+    } else if (parts.length === 10) { // Full update (oldName + 9 new fields)
+      const [oldName, newName, birthdateStr, age, nationalId, phone, bloodType, occupation, position, affiliation] = parts.map(p => p.trim());
+      const birthdate = parseThaiDateToDateObject(birthdateStr);
+      if (!birthdate) return sendReply(userId, '❗ รูปแบบวันเกิดไม่ถูกต้อง');
+      const formattedBirthdate = formatDateToThaiBuddhist(birthdate);
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(oldName).trim()) {
+          // อัปเดต setValues ให้ตรงกับจำนวนคอลัมน์ใหม่ (9 คอลัมน์ เริ่มจากคอลัมน์ 2)
+          wifeSheet.getRange(i + 1, 2, 1, 9).setValues([[newName, formattedBirthdate, age, nationalId, phone, bloodType, occupation, position, affiliation]]);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลภรรยา "${oldName}" เป็น "${newName}" เรียบร้อยแล้ว`);
+        clearCache('ข้อมูลภรรยา');
+      } else {
+        sendReply(userId, '❌ ไม่พบข้อมูลภรรยาที่ระบุ');
+      }
+    } else {
+      sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบการแก้ไขบางฟิลด์: /แก้ไขภรรยา <ชื่อ-สกุลเดิม>|<ชื่อฟิลด์>|<ค่าใหม่>
+📝 รูปแบบการแก้ไขทั้งหมด: /แก้ไขภรรยา <ชื่อเดิม>|<ชื่อใหม่>|<วันเกิด(พ.ศ.)>|<อายุ>|<เลขบัตร ปชช.>|<เบอร์โทร>|<กรุ๊ปเลือด>|<อาชีพ>|<ตำแหน่ง>|<สังกัด>`);
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการแก้ไขภรรยา: ${e.message}`);
+    Logger.log(`Error in handleEditWife: ${e.message}`);
+  }
+}
+
+function handleDeleteWife(userId, text) {
+  try {
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const wifeName = text.replace('/ลบภรรยา ', '').trim();
+    if (!wifeName) return sendReply(userId, '❗ รูปแบบ: /ลบภรรยา <ชื่อ-สกุลภรรยา>');
+
+    const wifeSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลภรรยา');
+    if (!wifeSheet) {
+      sendReply(userId, '❌ ไม่พบชีท "ข้อมูลภรรยา" กรุณาตรวจสอบ');
+      return;
+    }
+    const data = wifeSheet.getDataRange().getValues();
+    let foundAndDeleted = false;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(militaryId).trim() && String(data[i][1]).trim() === String(wifeName).trim()) {
+        wifeSheet.deleteRow(i + 1);
+        foundAndDeleted = true;
+        clearCache('ข้อมูลภรรยา');
+        break;
+      }
+    }
+    if (foundAndDeleted) {
+      sendReply(userId, `✅ ลบข้อมูลภรรยา "${wifeName}" เรียบร้อยแล้ว`);
+    } else {
+      sendReply(userId, '❌ ไม่พบข้อมูลภรรยาที่ระบุ');
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลบภรรยา: ${e.message}`);
+    Logger.log(`Error in handleDeleteWife: ${e.message}`);
+  }
+}
+
+function handleViewAllWives(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const wives = getSpreadsheetData('ข้อมูลภรรยา')
+      .slice(1)
+      .filter(row => String(row[0]).trim() === String(militaryId).trim());
+
+    if (!wives || wives.length === 0) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลภรรยาที่เชื่อมกับบัญชีนี้');
+    }
+
+    let message = '👩‍❤️‍👨 **ข้อมูลภรรยาทั้งหมด**\n\n';
+    wives.forEach((wife, index) => {
+      // อัปเดตการแสดงผลให้ตรงกับคอลัมน์ใหม่
+      message += `${index + 1}. ${wife[1]}\n`;
+      message += `  📅 เกิด: ${wife[2]} (อายุ ${wife[3]} ปี)\n`;
+      message += `  🆔 เลขบัตร ปชช.: ${wife[4]}\n`;
+      message += `  ☎️ เบอร์โทร: ${wife[5]}\n`;
+      message += `  🩸 กรุ๊ปเลือด: ${wife[6]}\n`;
+      message += `  💼 อาชีพ: ${wife[7]}\n`;
+      message += `  📍 ตำแหน่ง: ${wife[8]}\n`;
+      message += `  🏢 สังกัด: ${wife[9]}\n\n`;
+    });
+    sendReply(userId, message);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleViewAllWives: ${e.message}`);
+  }
+}
+
+function handleCommandWifeInfo(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const wives = getSpreadsheetData('ข้อมูลภรรยา')
+      .slice(1)
+      .filter(row => String(row[0]).trim() === String(militaryId).trim());
+
+    if (!wives || wives.length === 0) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลภรรยาที่เชื่อมกับบัญชีนี้');
+    }
+
+    wives.forEach(wife => {
+      // อัปเดตพารามิเตอร์ให้ตรงกับคอลัมน์ใหม่
+      sendFlexWifeInfo(userId, wife[1], wife[2], wife[3], wife[4], wife[5], wife[6], wife[7], wife[8], wife[9]);
+    });
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleCommandWifeInfo: ${e.message}`);
+  }
+}
+
+function sendFlexWifeInfo(userId, name, birthdate, age, nationalId, phone, bloodType, occupation, position, affiliation) {
+  const flex = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        { type: "text", text: "👩‍❤️‍👨 ข้อมูลภรรยา", weight: "bold", color: "#FF69B4", size: "lg", align: "center" },
+        { type: "separator", margin: "md" },
+        { type: "text", text: `ชื่อ: ${name}`, size: "md", wrap: true },
+        { type: "text", text: `วันเกิด: ${birthdate}`, size: "sm", color: "#666666" },
+        { type: "text", text: `อายุ: ${age} ปี`, size: "sm", color: "#666666" },
+        { type: "text", text: `เลขบัตร ปชช.: ${nationalId}`, size: "sm", color: "#666666" },
+        { type: "text", text: `เบอร์โทร: ${phone}`, size: "sm", color: "#666666" },
+        { type: "text", text: `กรุ๊ปเลือด: ${bloodType}`, size: "sm", color: "#666666" },
+        { type: "text", text: `อาชีพ: ${occupation}`, size: "sm", color: "#666666" },
+        { type: "text", text: `ตำแหน่ง: ${position}`, size: "sm", color: "#666666" },
+        { type: "text", text: `สังกัด: ${affiliation}`, size: "sm", color: "#666666" }
+      ]
+    }
+  };
+  sendFlex(userId, flex);
+}
+
+
+function parseThaiDateToDateObject(dateString) {
+  try {
+    const parts = dateString.split('/');
+    if (parts.length !== 3) return null;
+    let day = parseInt(parts[0], 10);
+    let month = parseInt(parts[1], 10);
+    let year = parseInt(parts[2], 10);
+    if (year > 2500) year -= 543;
+    const date = new Date(year, month - 1, day);
+    if (date.getDate() !== day || date.getMonth() + 1 !== month || date.getFullYear() !== year) return null;
+    return date;
+  } catch (e) {
+    Logger.log(`Error parsing date: ${dateString}, ${e.message}`);
+    return null;
+  }
+}
+
+function formatDateToThaiBuddhist(dateObject) {
+  if (!(dateObject instanceof Date) || isNaN(dateObject)) return 'N/A';
+  const day = String(dateObject.getDate()).padStart(2, '0');
+  const month = String(dateObject.getMonth() + 1).padStart(2, '0');
+  const yearBE = dateObject.getFullYear() + 543;
+  return `${day}/${month}/${yearBE}`;
+}
+
+function handleAddDuty(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์เพิ่มข้อมูลเวรยาม');
+    const parts = text.replace('/เพิ่มเวร ', '').split('|');
+    if (parts.length !== 7) return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบที่ถูกต้อง: /เพิ่มเวร <วันที่(DD/MM/YYYY พ.ศ.)>|<ยศ>|<ชื่อ>|<สกุล>|<ปฏิบัติหน้าที่>|<กองร้อย>|<เบอร์โทร>`);
+
+    const [dateStr, rank, firstName, lastName, duty, company, phone] = parts.map(p => p.trim());
+    const dutyDate = parseThaiDateToDateObject(dateStr);
+    if (!dutyDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง กรุณาใช้ DD/MM/YYYY (พ.ศ.)');
+    const formattedDate = formatDateToThaiBuddhist(dutyDate);
+    const dutySheet = SpreadsheetApp.getActive().getSheetByName('เวร - ยาม');
+    if (!dutySheet) return sendReply(userId, '❌ ไม่พบชีท "เวร - ยาม"');
+    dutySheet.appendRow([formattedDate, rank, firstName, lastName, duty, company, phone]);
+    clearCache('เวร - ยาม');
+    sendReply(userId, `✅ เพิ่มข้อมูลเวรยาม "${rank} ${firstName} ${lastName}" วันที่ ${formattedDate} เรียบร้อยแล้ว`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการเพิ่มเวร: ${e.message}`);
+    Logger.log(`Error in handleAddDuty: ${e.message}`);
+  }
+}
+
+function handleEditDuty(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์แก้ไขข้อมูลเวรยาม');
+    const cleanText = text.replace('/แก้ไขเวร ', '');
+    const parts = cleanText.split('|');
+    const dutySheet = SpreadsheetApp.getActive().getSheetByName('เวร - ยาม');
+    if (!dutySheet) return sendReply(userId, '❌ ไม่พบชีท "เวร - ยาม"');
+    const data = dutySheet.getDataRange().getValues();
+    const dutyFieldMap = { "วันที่": 0, "ยศ": 1, "ชื่อ": 2, "สกุล": 3, "ปฏิบัติหน้าที่": 4, "กองร้อย": 5, "เบอร์โทร": 6 };
+
+    if (parts.length === 5) { // Partial Update
+      const [oldDateStr, oldFirstName, oldLastName, fieldName, newValueRaw] = parts.map(p => p.trim());
+      const oldDutyDate = parseThaiDateToDateObject(oldDateStr);
+      if (!oldDutyDate) return sendReply(userId, '❗ รูปแบบวันที่เดิมไม่ถูกต้อง');
+      const formattedOldDate = formatDateToThaiBuddhist(oldDutyDate);
+      const colIndex = dutyFieldMap[fieldName];
+      if (colIndex === undefined) return sendReply(userId, `❌ ไม่พบชื่อฟิลด์ "${fieldName}"`);
+      let newValue = (fieldName === "วันที่") ? (parseThaiDateToDateObject(newValueRaw) ? formatDateToThaiBuddhist(parseThaiDateToDateObject(newValueRaw)) : null) : newValueRaw;
+      if (fieldName === "วันที่" && !newValue) return sendReply(userId, '❗ รูปแบบวันที่ใหม่ไม่ถูกต้อง');
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === formattedOldDate && String(data[i][2]).trim() === oldFirstName && String(data[i][3]).trim() === oldLastName) {
+          dutySheet.getRange(i + 1, colIndex + 1).setValue(newValue);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลเวรยามของ ${oldFirstName} ${oldLastName} วันที่ ${formattedOldDate} เรียบร้อยแล้ว`);
+        clearCache('เวร - ยาม');
+      } else {
+        sendReply(userId, `❌ ไม่พบข้อมูลเวรยามของ ${oldFirstName} ${oldLastName} วันที่ ${formattedOldDate}`);
+      }
+    } else if (parts.length === 10) { // Full Update
+      const [oldDateStr, oldFirstName, oldLastName, newDateStr, newRank, newFirstName, newLastName, newDuty, newCompany, newPhone] = parts.map(p => p.trim());
+      const oldDutyDate = parseThaiDateToDateObject(oldDateStr);
+      if (!oldDutyDate) return sendReply(userId, '❗ รูปแบบวันที่เดิมไม่ถูกต้อง');
+      const formattedOldDate = formatDateToThaiBuddhist(oldDutyDate);
+      const newDutyDate = parseThaiDateToDateObject(newDateStr);
+      if (!newDutyDate) return sendReply(userId, '❗ รูปแบบวันที่ใหม่ไม่ถูกต้อง');
+      const formattedNewDate = formatDateToThaiBuddhist(newDutyDate);
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]).trim() === formattedOldDate && String(data[i][2]).trim() === oldFirstName && String(data[i][3]).trim() === oldLastName) {
+          const newData = [formattedNewDate, newRank, newFirstName, newLastName, newDuty, newCompany, newPhone];
+          dutySheet.getRange(i + 1, 1, 1, newData.length).setValues([newData]);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลเวรยามของ ${oldFirstName} ${oldLastName} วันที่ ${formattedOldDate} เรียบร้อยแล้ว`);
+        clearCache('เวร - ยาม');
+      } else {
+        sendReply(userId, '❌ ไม่พบข้อมูลเวรยามที่ระบุ');
+      }
+    } else {
+      sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบการแก้ไขบางฟิลด์: /แก้ไขเวร <วันที่เดิม>|<ชื่อเดิม>|<สกุลเดิม>|<ชื่อฟิลด์>|<ค่าใหม่>
+📝 รูปแบบการแก้ไขทั้งหมด: /แก้ไขเวร <วันที่เดิม>|<ชื่อเดิม>|<สกุลเดิม>|<วันที่ใหม่>|<ยศใหม่>|...`);
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการแก้ไขเวร: ${e.message}`);
+    Logger.log(`Error in handleEditDuty: ${e.message}`);
+  }
+}
+
+function handleDeleteDuty(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ลบข้อมูลเวรยาม');
+    const parts = text.replace('/ลบเวร ', '').split('|');
+    if (parts.length !== 3) return sendReply(userId, '❗ รูปแบบ: /ลบเวร <วันที่(DD/MM/YYYY พ.ศ.)>|<ชื่อ>|<สกุล>');
+    const [dateStr, firstName, lastName] = parts.map(p => p.trim());
+    const dutyDate = parseThaiDateToDateObject(dateStr);
+    if (!dutyDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+    const formattedDate = formatDateToThaiBuddhist(dutyDate);
+    const dutySheet = SpreadsheetApp.getActive().getSheetByName('เวร - ยาม');
+    if (!dutySheet) return sendReply(userId, '❌ ไม่พบชีท "เวร - ยาม"');
+    const data = dutySheet.getDataRange().getValues();
+    let foundAndDeleted = false;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === formattedDate && String(data[i][2]).trim() === firstName && String(data[i][3]).trim() === lastName) {
+        dutySheet.deleteRow(i + 1);
+        foundAndDeleted = true;
+        break;
+      }
+    }
+    if (foundAndDeleted) {
+      sendReply(userId, `✅ ลบข้อมูลเวรยาม "${firstName} ${lastName}" วันที่ ${formattedDate} เรียบร้อยแล้ว`);
+      clearCache('เวร - ยาม');
+    } else {
+      sendReply(userId, '❌ ไม่พบข้อมูลเวรยามที่ระบุ');
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลบเวร: ${e.message}`);
+    Logger.log(`Error in handleDeleteDuty: ${e.message}`);
+  }
+}
+
+function handleViewAllDuties(e) {
+  try {
+    const userId = e.source.userId;
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ดูข้อมูลเวรยามทั้งหมด');
+    const duties = getSpreadsheetData('เวร - ยาม').slice(1);
+    if (!duties || duties.length === 0) return sendReply(userId, '📭 ไม่มีข้อมูลเวรยาม');
+    let message = '🛡️ **ข้อมูลเวรยามทั้งหมด**\n\n';
+    duties.slice(0, 20).forEach((duty, index) => {
+      message += `${index + 1}. ${duty[0]} - ${duty[1]} ${duty[2]} ${duty[3]}\n`;
+      message += `  📍 ${duty[4]} | ${duty[5]} | ☎️ ${duty[6]}\n\n`;
+    });
+    if (duties.length > 20) message += `\n... และอีก ${duties.length - 20} รายการ`;
+    sendReply(userId, message);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleViewAllDuties: ${e.message}`);
+  }
+}
+
+function handleAddPersonnel(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์เพิ่มข้อมูลกำลังพล');
+    const parts = text.replace('/เพิ่มกำลังพล ', '').split('|');
+    if (parts.length !== 18) {
+      return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง ต้องใส่ข้อมูล 18 ฟิลด์: /เพิ่มกำลังพล <กองร้อย>|<ยศ>|<ชื่อ>|<สกุล>|...`);
+    }
+
+    const [company, rank, firstName, lastName, nationalId, militaryId, affiliation, position, branch, origin, birthdateStr, age, registrationDateStr, appointmentDateStr, rankAcquisitionDateStr, salary, retirementYear, imageUrl] = parts.map(p => p.trim());
+    const birthdate = parseThaiDateToDateObject(birthdateStr);
+    const registrationDate = parseThaiDateToDateObject(registrationDateStr);
+    const appointmentDate = parseThaiDateToDateObject(appointmentDateStr);
+    const rankAcquisitionDate = parseThaiDateToDateObject(rankAcquisitionDateStr);
+
+    if (!birthdate || !registrationDate || !appointmentDate || !rankAcquisitionDate) {
+      return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง กรุณาใช้ DD/MM/YYYY (พ.ศ.)');
+    }
+
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    if (!personnelSheet) return sendReply(userId, '❌ ไม่พบชีท "ข้อมูลกำลังพล"');
+    personnelSheet.appendRow([company, rank, firstName, lastName, nationalId, militaryId, affiliation, position, branch, origin, formatDateToThaiBuddhist(birthdate), age, formatDateToThaiBuddhist(registrationDate), formatDateToThaiBuddhist(appointmentDate), formatDateToThaiBuddhist(rankAcquisitionDate), salary, retirementYear, imageUrl]);
+    clearCache('ข้อมูลกำลังพล');
+    sendReply(userId, `✅ เพิ่มข้อมูลกำลังพล "${rank} ${firstName} ${lastName}" เรียบร้อยแล้ว`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการเพิ่มกำลังพล: ${e.message}`);
+    Logger.log(`Error in handleAddPersonnel: ${e.message}`);
+  }
+}
+
+function handleEditPersonnel(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์แก้ไขข้อมูลกำลังพล');
+    const cleanText = text.replace('/แก้ไขกำลังพล ', '');
+    const parts = cleanText.split('|');
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    if (!personnelSheet) return sendReply(userId, '❌ ไม่พบชีท "ข้อมูลกำลังพล"');
+    const data = personnelSheet.getDataRange().getValues();
+    const personnelFieldMap = { "กองร้อย": 0, "ยศ": 1, "ชื่อ": 2, "สกุล": 3, "เลขบัตรประชาชน": 4, "เลขทหาร": 5, "สังกัด": 6, "ตำแหน่ง": 7, "เหล่า": 8, "กำเนิด": 9, "วันเกิด": 10, "อายุ": 11, "วันขึ้นทะเบียน": 12, "วันบรรจุ": 13, "วันครองยศ": 14, "เงินเดือน": 15, "ปีเกษียณ": 16, "URL รูปภาพ": 17 };
+
+    if (parts.length === 3) { // Partial Update
+      const [militaryId, fieldName, newValueRaw] = parts.map(p => p.trim());
+      const colIndex = personnelFieldMap[fieldName];
+      if (colIndex === undefined) return sendReply(userId, `❌ ไม่พบชื่อฟิลด์ "${fieldName}"`);
+      let newValue = newValueRaw;
+      if (["วันเกิด", "วันขึ้นทะเบียน", "วันบรรจุ", "วันครองยศ"].includes(fieldName)) {
+        const newDate = parseThaiDateToDateObject(newValueRaw);
+        if (!newDate) return sendReply(userId, `❗ รูปแบบวันที่ไม่ถูกต้องสำหรับ "${fieldName}"`);
+        newValue = formatDateToThaiBuddhist(newDate);
+      }
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][5]).trim() === String(militaryId).trim()) {
+          personnelSheet.getRange(i + 1, colIndex + 1).setValue(newValue);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลกำลังพลเลขทหาร "${militaryId}" ฟิลด์ "${fieldName}" เรียบร้อยแล้ว`);
+        clearCache('ข้อมูลกำลังพล');
+      } else {
+        sendReply(userId, `❌ ไม่พบข้อมูลกำลังพลเลขทหาร "${militaryId}"`);
+      }
+    } else if (parts.length === 19) { // Full Update
+      const oldMilitaryId = parts[0].trim();
+      const newDataRaw = parts.slice(1).map(p => p.trim());
+      const dateFieldsRelativeIndices = [10, 12, 13, 14];
+      const formattedNewData = [...newDataRaw];
+      for (const index of dateFieldsRelativeIndices) {
+        const dateObject = parseThaiDateToDateObject(formattedNewData[index]);
+        if (!dateObject) return sendReply(userId, `❗ รูปแบบวันที่ไม่ถูกต้องสำหรับฟิลด์วันที่ในข้อมูลใหม่`);
+        formattedNewData[index] = formatDateToThaiBuddhist(dateObject);
+      }
+      let foundAndEdited = false;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][5]).trim() === String(oldMilitaryId).trim()) {
+          personnelSheet.getRange(i + 1, 1, 1, formattedNewData.length).setValues([formattedNewData]);
+          foundAndEdited = true;
+          break;
+        }
+      }
+      if (foundAndEdited) {
+        sendReply(userId, `✅ แก้ไขข้อมูลกำลังพลเลขทหาร "${oldMilitaryId}" ทั้งหมดเรียบร้อยแล้ว`);
+        clearCache('ข้อมูลกำลังพล');
+      } else {
+        sendReply(userId, '❌ ไม่พบข้อมูลกำลังพลที่ระบุ');
+      }
+    } else {
+      sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบการแก้ไขบางฟิลด์: /แก้ไขกำลังพล <เลขทหาร>|<ชื่อฟิลด์>|<ค่าใหม่>
+📝 รูปแบบการแก้ไขทั้งหมด: /แก้ไขกำลังพล <เลขทหารเดิม>|<กองร้อย>|<ยศ>|...`);
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการแก้ไขกำลังพล: ${e.message}`);
+    Logger.log(`Error in handleEditPersonnel: ${e.message}`);
+  }
+}
+
+function handleDeletePersonnel(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ลบข้อมูลกำลังพล');
+    const militaryIdToDelete = text.replace('/ลบกำลังพล ', '').trim();
+    if (!militaryIdToDelete) return sendReply(userId, '❗ รูปแบบ: /ลบกำลังพล <เลขทหาร>');
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    if (!personnelSheet) return sendReply(userId, '❌ ไม่พบชีท "ข้อมูลกำลังพล"');
+    const data = personnelSheet.getDataRange().getValues();
+    let foundAndDeleted = false;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][5]).trim() === String(militaryIdToDelete).trim()) {
+        personnelSheet.deleteRow(i + 1);
+        foundAndDeleted = true;
+        break;
+      }
+    }
+    if (foundAndDeleted) {
+      sendReply(userId, `✅ ลบข้อมูลกำลังพลเลขทหาร "${militaryIdToDelete}" เรียบร้อยแล้ว`);
+      clearCache('ข้อมูลกำลังพล');
+    } else {
+      sendReply(userId, '❌ ไม่พบข้อมูลกำลังพลที่ระบุ');
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลบกำลังพล: ${e.message}`);
+    Logger.log(`Error in handleDeletePersonnel: ${e.message}`);
+  }
+}
+
+function handleViewAllPersonnel(e) {
+  try {
+    const userId = e.source.userId;
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ดูข้อมูลกำลังพลทั้งหมด');
+    const personnel = getSpreadsheetData('ข้อมูลกำลังพล').slice(1);
+    if (!personnel || personnel.length === 0) return sendReply(userId, '📭 ไม่มีข้อมูลกำลังพล');
+    let message = '👥 **ข้อมูลกำลังพลทั้งหมด**\n\n';
+    personnel.slice(0, 15).forEach((person, index) => {
+      message += `${index + 1}. ${person[1]} ${person[2]} ${person[3]}\n`;
+      message += `  🆔 ${person[5]} | ${person[0]} | ${person[7]}\n`;
+      message += `  📅 อายุ ${person[11]} ปี | เกษียณ ${person[16]}\n\n`;
+    });
+    if (personnel.length > 15) message += `\n... และอีก ${personnel.length - 15} คน`;
+    sendReply(userId, message);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleViewAllPersonnel: ${e.message}`);
+  }
+}
+
+// 📋 ฟังก์ชันสำหรับค้นหากำลังพล (ที่หายไป)
+function handleSearchPersonnel(userId, text) {
+  try {
+    // ตรวจสอบสิทธิ์การใช้งาน (อาจจะให้ใช้ได้ทุกคน หรือเฉพาะแอดมิน)
+    // หากต้องการให้แอดมินใช้เท่านั้น ให้เปิดใช้งานบรรทัดด้านล่าง
+    // if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ใช้คำสั่งนี้');
+
+    const keyword = text.replace('/ค้นหากำลังพล ', '').trim().toLowerCase();
+    if (!keyword) {
+      return sendReply(userId, '❗ โปรดระบุชื่อ, สกุล, หรือเลขทหารที่ต้องการค้นหา\nตัวอย่าง: /ค้นหากำลังพล สมชาย');
+    }
+
+    const personnelData = getSpreadsheetData('ข้อมูลกำลังพล');
+    if (!personnelData || personnelData.length <= 1) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลกำลังพลในระบบ');
+    }
+
+    const results = personnelData.slice(1).filter(person => {
+      // ค้นหาจาก ยศ, ชื่อ, สกุล, และเลขทหาร
+      const searchableText = `${person[1] || ''} ${person[2] || ''} ${person[3] || ''} ${person[5] || ''}`.toLowerCase();
+      return searchableText.includes(keyword);
+    });
+
+    if (results.length === 0) {
+      return sendReply(userId, `❌ ไม่พบข้อมูลกำลังพลที่ตรงกับคำว่า "${keyword}"`);
+    }
+
+    let message = `✅ พบข้อมูลกำลังพลที่เกี่ยวข้อง ${results.length} นาย:\n\n`;
+    // แสดงผลลัพธ์สูงสุด 10 คนเพื่อไม่ให้ข้อความยาวเกินไป
+    results.slice(0, 10).forEach((person, index) => {
+      message += `${index + 1}. ${person[1] || ''} ${person[2] || ''} ${person[3] || ''}\n`;
+      message += `   - เลขทหาร: ${person[5] || 'ไม่มี'}\n`;
+      message += `   - ตำแหน่ง: ${person[7] || 'ไม่มี'}\n\n`;
+    });
+
+    if (results.length > 10) {
+      message += `... และอีก ${results.length - 10} คน`;
+    }
+
+    sendReply(userId, message);
+
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการค้นหากำลังพล: ${e.message}`);
+    Logger.log(`Error in handleSearchPersonnel: ${e.message}`);
+  }
+}
+
+function handleCommandChildInfo(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const children = getSpreadsheetData('ข้อมูลบุตร-ธิดา')
+      .slice(1)
+      .filter(row => String(row[0]).trim() === String(militaryId).trim());
+    if (!children || children.length === 0) return sendReply(userId, '📭 ไม่มีข้อมูลบุตรที่เชื่อมกับบัญชีนี้');
+    children.forEach(child => sendFlexChildInfo(userId, child[1], child[2], child[3], child[4], child[5], child[6], child[7]));
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleCommandChildInfo: ${e.message}`);
+  }
+}
+
+function sendFlexChildInfo(userId, name, birthdate, age, educationLevel, grade, school, result) {
+  const flex = {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        { type: "text", text: "👶 ข้อมูลบุตร", weight: "bold", color: "#007bff", size: "lg", align: "center" },
+        { type: "separator", margin: "md" },
+        { type: "text", text: `ชื่อ: ${name}`, size: "md", wrap: true },
+        { type: "text", text: `วันเกิด: ${birthdate}`, size: "sm", color: "#666666" },
+        { type: "text", text: `อายุ: ${age} ปี`, size: "sm", color: "#666666" },
+        { type: "text", text: `ระดับการศึกษา: ${educationLevel}`, size: "sm", color: "#666666", wrap: true },
+        { type: "text", text: `ระดับชั้น: ${grade}`, size: "sm", color: "#666666", wrap: true },
+        { type: "text", text: `สถานศึกษา: ${school}`, size: "sm", color: "#666666", wrap: true },
+        { type: "text", text: `ผลการเรียน: ${result}`, size: "sm", color: "#666666" }
+      ]
+    }
+  };
+  sendFlex(userId, flex);
+}
+
+function handleCommandPersonnelInfo(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) {
+      return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน หรือตรวจสอบว่ามีเลขประจำตัวทหารในระบบแล้วหรือไม่');
+    }
+
+    const pData = getSpreadsheetData('ข้อมูลกำลังพล').slice(1);
+    
+    let foundPersonnel = false;
+    for (let i = 0; i < pData.length; i++) {
+      const data = pData[i];
+      if (String(data[5]).trim() === String(militaryId).trim()) {
+        foundPersonnel = true;
+
+        // ✅ ดึงจากคอลัมน์ 17 (R) ก่อน → ถ้าไม่ได้ค่อยใช้คอลัมน์ 18 (S)
+        const linkFromR = data[17] ? String(data[17]).trim() : '';
+        const linkFromS = data[18] ? String(data[18]).trim() : '';
+        let imageUrl = 'https://img5.pic.in.th/file/secure-sv1/-199a79ca217285bdf.jpg'; // รูปสำรอง
+
+        if (linkFromR.includes('/d/')) {
+          const match = linkFromR.match(/\/d\/([a-zA-Z0-9_-]+)\//);
+          if (match && match[1]) {
+            imageUrl = `https://drive.google.com/uc?export=view&id=${match[1]}`;
+          }
+        } else if (linkFromS.startsWith('http')) {
+          imageUrl = linkFromS;
+        }
+
+        const flex = {
+          type: "bubble",
+          size: "giga",
+          body: {
+            type: "box",
+            layout: "vertical",
+            contents: [
+              {
+                type: "image",
+                url: imageUrl,
+                size: "full",
+                aspectMode: "cover",
+                aspectRatio: "1:1",
+                gravity: "center"
+              },
+              {
+                type: "box",
+                layout: "vertical",
+                spacing: "sm",
+                paddingAll: "lg",
+                contents: [
+                  {
+                    type: "text",
+                    text: "🪖 ข้อมูลกำลังพล",
+                    weight: "bold",
+                    color: "#1DB446",
+                    size: "lg",
+                    align: "center"
+                  },
+                  {
+                    type: "separator",
+                    margin: "md"
+                  },
+                  {
+                    type: "text",
+                    text: `${data[1] || ''} ${data[2] || ''} ${data[3] || ''}`,
+                    weight: "bold",
+                    size: "lg",
+                    align: "center",
+                    margin: "md",
+                    wrap: true
+                  },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    margin: "md",
+                    spacing: "xs",
+                    contents: [
+                      { type: "text", text: `📌 กองร้อย : ${data[0] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🆔 หมายเลข ปชช. : ${data[4] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🪖 หมายเลขทหาร : ${data[5] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `📍 สังกัด : ${data[6] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🎖️ ตำแหน่ง : ${data[7] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🔰 เหล่า : ${data[8] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🏠 กำเนิด : ${data[9] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🎂 วันเกิด : ${data[10] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `⏳ อายุ : ${data[11] || 'ไม่ระบุ'} ปี`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันขึ้นทะเบียน : ${data[12] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันที่บรรจุ : ${data[13] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `🗓️ วันที่ครองยศ : ${data[14] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `💰 เงินเดือนปัจจุบัน : ${data[15] || 'ไม่ระบุ'}`, size: "sm", wrap: true },
+                      { type: "text", text: `📆 ปีเกษียณ : ${data[16] || 'ไม่ระบุ'}`, size: "sm", wrap: true }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          styles: {
+            body: {
+              separator: true
+            }
+          }
+        };
+
+        sendFlex(userId, flex);
+        return;
+      }
+    }
+
+    if (!foundPersonnel) {
+      sendReply(userId, '📭 ไม่พบข้อมูลกำลังพล กรุณาตรวจสอบเลขประจำตัวทหาร หรือติดต่อผู้ดูแลระบบ');
+    }
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleCommandPersonnelInfo: ${e.message}`);
+  }
+}
+
+function createKeyValueBox(key, value) {
+  return {
+    type: "box",
+    layout: "horizontal",
+    contents: [
+      { type: "text", text: key, size: "sm", color: "#555555", flex: 3 },
+      { type: "text", text: value, size: "sm", color: "#111111", wrap: true, flex: 7, align: "end" }
+    ]
+  };
+}
+
+function handleCommandDutyToday(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const personnel = getSpreadsheetData('ข้อมูลกำลังพล').slice(1).find(row => String(row[5]).trim() === String(militaryId).trim());
+    if (!personnel) return sendReply(userId, '📭 ไม่พบข้อมูลชื่อกำลังพล');
+    const name = personnel[2];
+
+    const today = new Date();
+    const formattedToday = formatDateToThaiBuddhist(today);
+    const duties = getSpreadsheetData('เวร - ยาม').slice(1);
+    const foundDuty = duties.find(row => row[0] && row[2] && String(row[0]).trim() === formattedToday && String(row[2]).trim() === name);
+
+    if (foundDuty) {
+      const fullName = `${foundDuty[1]} ${foundDuty[2]} ${foundDuty[3]}`;
+      const duty = foundDuty[4] || 'ไม่ระบุหน้าที่';
+      const company = foundDuty[5] || 'ไม่ระบุกองร้อย';
+      const phone = foundDuty[6] || 'ไม่ระบุเบอร์โทร';
+      sendFlexDutyReminder(userId, fullName, duty, company, phone);
+    } else {
+      sendReply(userId, '✅ วันนี้คุณไม่มีเวรยาม');
+    }
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleCommandDutyToday: ${e.message}`);
+  }
+}
+
+function sendFlexDutyReminder(userId, fullName, duty, company, phone) {
+  const flex = {
+    type: "bubble",
+    header: {
+      type: "box", layout: "vertical", contents: [{ type: "text", text: "⏰ เวรยามวันนี้", weight: "bold", color: "#ffffff", size: "lg", align: "center" }],
+      backgroundColor: "#FF5722", paddingAll: "md"
+    },
+    body: {
+      type: "box", layout: "vertical", spacing: "md", contents: [
+        { type: "text", text: `👤 ${fullName}`, weight: "bold", size: "md", align: "center" },
+        { type: "separator", margin: "md" },
+        createKeyValueBox("หน้าที่", duty),
+        createKeyValueBox("กองร้อย", company),
+        createKeyValueBox("เบอร์โทร", phone)
+      ]
+    }
+  };
+  sendFlex(userId, flex);
+}
+
+/**
+ * แสดงเวรยามประจำเดือน
+ * @param {object} e - Event object จาก LINE
+ */
+function handleMonthlyDuty(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+
+    const personnel = getSpreadsheetData('ข้อมูลกำลังพล').slice(1).find(row => String(row[5]).trim() === String(militaryId).trim());
+    if (!personnel) return sendReply(userId, '📭 ไม่พบข้อมูลชื่อกำลังพล');
+    const name = personnel[2];
+
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1; // getMonth() returns 0-11, so add 1 for 1-12
+    const currentYear = today.getFullYear();
+    const duties = getSpreadsheetData('เวร - ยาม').slice(1);
+    
+    // กรองหาเวรยามของเดือนปัจจุบัน
+    const monthlyDuties = duties.filter(row => {
+      if (!row[0] || !row[2]) return false;
+      const dutyDate = parseThaiDateToDateObject(String(row[0]).trim()); // Parse B.E. string to Date object
+      if (!dutyDate) {
+        Logger.log(`Skipping row due to invalid date format: ${row[0]}`);
+        return false;
+      }
+      return dutyDate.getMonth() + 1 === currentMonth && 
+             dutyDate.getFullYear() === currentYear && 
+             String(row[2]).trim() === name;
+    }).map(row => ({
+      date: String(row[0]), 
+      rank: row[1] || '', 
+      position: row[4] || 'ไม่ระบุหน้าที่', 
+      company: row[5] || 'ไม่ระบุกองร้อย', 
+      phone: row[6] || 'ไม่ระบุเบอร์โทร'
+    }));
+
+    if (monthlyDuties.length === 0) {
+      return sendReply(userId, '📅 เดือนนี้คุณไม่มีเวรยาม');
+    }
+
+    const monthNames = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                        'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+    const flex = {
+      type: 'bubble', size: 'mega',
+      header: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: `📅 เวรประจำเดือน${monthNames[currentMonth - 1]}`, weight: 'bold', color: '#ffffff', size: 'lg' }], backgroundColor: '#FF9800' },
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'md', contents: [
+          { type: 'text', text: `👤 ${monthlyDuties[0].rank} ${name}`, weight: 'bold', size: 'md' },
+          { type: 'separator', margin: 'md' },
+          ...monthlyDuties.map(duty => ({
+            type: 'box', layout: 'vertical', margin: 'sm', contents: [
+              { type: 'text', text: `📅 ${duty.date}`, size: 'sm', weight: 'bold' },
+              { type: 'text', text: `📍 ${duty.position}`, size: 'xs', color: '#666666' },
+              { type: 'text', text: `🏢 ${duty.company}`, size: 'xs', color: '#666666' },
+              { type: 'text', text: `☎️ ${duty.phone}`, size: 'xs', color: '#666666' }
+            ]
+          }))
+        ]
+      }
+    };
+    sendFlex(userId, flex);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleMonthlyDuty: ${e.message}`);
+  }
+}
+
+function handlePastDuties(e) {
+  try {
+    const userId = e.source.userId;
+    const militaryId = getUserMilitaryId(userId);
+    if (!militaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const personnel = getSpreadsheetData('ข้อมูลกำลังพล').slice(1).find(row => String(row[5]).trim() === String(militaryId).trim());
+    if (!personnel) return sendReply(userId, '📭 ไม่พบข้อมูลชื่อกำลังพล');
+    const name = personnel[2];
+
+    const today = new Date();
+    const duties = getSpreadsheetData('เวร - ยาม').slice(1);
+    const pastDuties = duties.filter(row => {
+      const dutyDate = parseThaiDateToDateObject(String(row[0]).trim());
+      return dutyDate && dutyDate < today && String(row[2]).trim() === name;
+    }).map(row => ({
+      date: String(row[0]), position: row[4] || 'ไม่ระบุหน้าที่', company: row[5] || 'ไม่ระบุกองร้อย', phone: row[6] || 'ไม่ระบุเบอร์โทร', sortDate: parseThaiDateToDateObject(String(row[0]))
+    }));
+
+    pastDuties.sort((a, b) => b.sortDate - a.sortDate);
+    const recentDuties = pastDuties.slice(0, 10);
+
+    if (recentDuties.length === 0) return sendReply(userId, '📭 ไม่มีประวัติเวรย้อนหลัง');
+
+    const flex = {
+      type: 'bubble', size: 'mega',
+      header: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: '📋 ประวัติเวรย้อนหลัง', weight: 'bold', color: '#ffffff', size: 'lg' }], backgroundColor: '#9C27B0' },
+      body: {
+        type: 'box', layout: 'vertical', spacing: 'sm', contents: [
+          { type: 'text', text: `👤 ${name}`, weight: 'bold', size: 'md' },
+          { type: 'separator', margin: 'md' },
+          ...recentDuties.map(duty => ({
+            type: 'box', layout: 'vertical', margin: 'xs', contents: [
+              { type: 'text', text: `📅 ${duty.date} - ${duty.position}`, size: 'sm' },
+              { type: 'text', text: `🏢 ${duty.company}`, size: 'xs', color: '#666666' }
+            ]
+          }))
+        ]
+      }
+    };
+    sendFlex(userId, flex);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handlePastDuties: ${e.message}`);
+  }
+}
+
+function handleCompanyChildrenReport(e) {
+  try {
+    const userId = e.source.userId;
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ดูรายงานนี้');
+    const childData = getSpreadsheetData('ข้อมูลบุตร-ธิดา');
+    const personnelData = getSpreadsheetData('ข้อมูลกำลังพล');
+    if (!childData || !personnelData || childData.length <= 1 || personnelData.length <= 1) {
+      return sendReply(userId, '📭 ไม่มีข้อมูลในระบบเพื่อสร้างรายงาน');
+    }
+    const children = childData.slice(1);
+    const personnel = personnelData.slice(1);
+
+    let report = '📊 **รายงานบุตรทั้งกองร้อย**\n\n';
+    let totalChildren = 0;
+    let schoolAgeChildren = 0;
+    const childrenByMilitaryId = children.reduce((acc, child) => {
+      if (child[0]) {
+        const militaryId = String(child[0]).trim();
+        if (!acc[militaryId]) acc[militaryId] = [];
+        acc[militaryId].push(child);
+      }
+      return acc;
+    }, {});
+
+    personnel.forEach(person => {
+      if (person[5]) {
+        const militaryId = String(person[5]).trim();
+        const childrenOfThisPersonnel = childrenByMilitaryId[militaryId] || [];
+        report += `**${person[1] || 'ไม่ระบุ'} ${person[2] || 'ไม่ระบุ'} ${person[3] || 'ไม่ระบุ'} (${person[0] || 'ไม่ระบุ'})**\n`;
+        if (childrenOfThisPersonnel.length > 0) {
+          childrenOfThisPersonnel.forEach((child, index) => {
+            const childAge = parseInt(child[3], 10) || 0;
+            report += `  ${index + 1}. ${child[1] || 'ไม่ระบุ'} (อายุ ${childAge} ปี)\n`;
+            report += `    การศึกษา: ${child[4] || 'ไม่ระบุ'}, โรงเรียน: ${child[6] || 'ไม่ระบุ'}\n`;
+            totalChildren++;
+            if (childAge >= 6 && childAge <= 18) schoolAgeChildren++;
+          });
+        } else {
+          report += `  - ไม่มีข้อมูลบุตร\n`;
+        }
+        report += '\n';
+      }
+    });
+    report += `---
+**สรุป:**
+จำนวนบุตรรวมทั้งหมด: ${totalChildren} คน
+จำนวนบุตรวัยเรียน (6-18 ปี): ${schoolAgeChildren} คน`;
+    sendReply(userId, report);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleCompanyChildrenReport: ${e.message}`);
+  }
+}
+
+function handleGenerateReport(e) {
+  try {
+    const userId = e.source.userId;
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ดูรายงานนี้');
+
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    const childSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลบุตร-ธิดา');
+    const wifeSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลภรรยา');
+    const dutySheet = SpreadsheetApp.getActive().getSheetByName('เวร - ยาม');
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+
+    const totalPersonnel = personnelSheet ? personnelSheet.getLastRow() - 1 : 0;
+    const totalChildren = childSheet ? childSheet.getLastRow() - 1 : 0;
+    const totalWives = wifeSheet ? wifeSheet.getLastRow() - 1 : 0;
+    const totalDuties = dutySheet ? dutySheet.getLastRow() - 1 : 0;
+    const totalCommands = commandSheet ? commandSheet.getLastRow() - 1 : 0;
+
+    let report = `📊 **สรุปรายงานข้อมูล**\n\n`;
+    report += `👥 จำนวนกำลังพลทั้งหมด: ${totalPersonnel} นาย\n`;
+    report += `👩‍❤️‍👨 จำนวนภรรยาทั้งหมด: ${totalWives} คน\n`;
+    report += `👶 จำนวนบุตรรวมทั้งหมด: ${totalChildren} คน\n`;
+    report += `🛡️ จำนวนเวรยามที่บันทึก: ${totalDuties} รายการ\n`;
+    report += `📜 จำนวนหนังสือคำสั่งที่บันทึก: ${totalCommands} รายการ\n\n`;
+    report += `(ข้อมูลนี้เป็นข้อมูลสรุปเบื้องต้น)`;
+
+    sendReply(userId, report);
+  } catch (e) {
+    sendReply(e.source.userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleGenerateReport: ${e.message}`);
+  }
+}
+
+
+function getUserMilitaryId(userId) {
+  const loginData = getSpreadsheetData('LOGIN');
+  if (!loginData) return null;
+  for (let i = 1; i < loginData.length; i++) {
+    if (loginData[i][0] === userId) return String(loginData[i][1]).trim();
+  }
+  return null;
+}
+
+function getMilitaryIdByPersonnelName(rank, firstName, lastName) {
+  const pData = getSpreadsheetData('ข้อมูลกำลังพล');
+  if (!pData) return null;
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][1]).trim() === String(rank).trim() && String(pData[i][2]).trim() === String(firstName).trim() && String(pData[i][3]).trim() === String(lastName).trim()) {
+      return String(pData[i][5]).trim();
+    }
+  }
+  return null;
+}
+
+function checkAdminPermission(userId) {
+  try {
+    const adminData = getSpreadsheetData('ADMIN');
+    if (!adminData) {
+      Logger.log('Error: Sheet named "ADMIN" not found.');
+      return false;
+    }
+    const adminUserIds = adminData.slice(1).map(row => String(row[0]).trim());
+    return adminUserIds.includes(String(userId).trim());
+  } catch (e) {
+    Logger.log(`Error checking admin permission: ${e.message}`);
+    return false;
+  }
+}
+
+function createDailyDutyReminderTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendDailyDutyReminder') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendDailyDutyReminder')
+    .timeBased()
+    .everyDays(1)
+    .atHour(7)
+    .nearMinute(30)
+    .inTimezone('Asia/Bangkok')
+    .create();
+  Logger.log('Daily duty reminder trigger created successfully.');
+}
+
+/**
+ * ฟังก์ชันสำหรับส่งแจ้งเตือนเวรยามประจำวัน (รันโดย Trigger)
+ */
+function sendDailyDutyReminder() {
+  try {
+    const ddata = getSpreadsheetData('เวร - ยาม');
+    const today = new Date();
+    const formattedToday = formatDateToThaiBuddhist(today);
+    const loginData = getSpreadsheetData('LOGIN');
+    const pData = getSpreadsheetData('ข้อมูลกำลังพล');
+
+    if (!ddata || !loginData || !pData) {
+      Logger.log('Required sheets are missing or empty. Skipping daily reminder.');
+      return;
+    }
+
+    const militaryIdToUserId = loginData.slice(1).reduce((acc, row) => {
+      if (row[0] && row[1]) {
+        acc[String(row[1]).trim()] = String(row[0]).trim();
+      }
+      return acc;
+    }, {});
+
+    ddata.slice(1).forEach(row => {
+      // Columns: วันที่(0), ยศ(1), ชื่อ(2), สกุล(3), ปฏิบัติหน้าที่(4), กองร้อย(5), เบอร์โทร(6)
+      if (row[0] && row[2]) {
+        const dutyDateStr = String(row[0]).trim();
+        if (dutyDateStr === formattedToday) {
+          const [rank, firstName, lastName, duty, company, phone] = [row[1], row[2], row[3], row[4], row[5], row[6]];
+          
+          // ค้นหา militaryId จากชื่อและสกุลในข้อมูลกำลังพล
+          const personnelEntry = pData.slice(1).find(pRow => 
+            String(pRow[2]).trim() === String(firstName).trim() && 
+            String(pRow[3]).trim() === String(lastName).trim()
+          );
+
+          if (personnelEntry && personnelEntry[5]) {
+            const militaryIdFound = String(personnelEntry[5]).trim();
+            if (militaryIdToUserId[militaryIdFound]) {
+              const targetUserId = militaryIdToUserId[militaryIdFound];
+              sendFlexDutyReminder(targetUserId, `${rank} ${firstName} ${lastName}`, duty, company, phone);
+              Logger.log(`Sent daily duty reminder to user for ${firstName} ${lastName} (Military ID: ${militaryIdFound})`);
+            } else {
+              Logger.log(`No LINE User ID found in LOGIN sheet for Military ID: ${militaryIdFound}`);
+            }
+          } else {
+            Logger.log(`No matching personnel found in 'ข้อมูลกำลังพล' sheet for: ${firstName} ${lastName}`);
+          }
+        }
+      }
+    });
+  } catch (e) {
+    Logger.log(`Error in sendDailyDutyReminder: ${e.message}, Stack: ${e.stack}`);
+  }
+}
+
+function handleAddCommand(userId, text) {
+  try {
+    const currentUserMilitaryId = getUserMilitaryId(userId);
+    if (!currentUserMilitaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const parts = text.replace('/เพิ่มหนังสือคำสั่ง ', '').split('|');
+    if (parts.length !== 7) return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบ: /เพิ่มหนังสือคำสั่ง <ยศ>|<ชื่อ>|<สกุล>|<รายการคำสั่ง>|<คำสั่งที่>|<ลงวันที่(พ.ศ.)>|<ลิงก์ไฟล์>`);
+    const [rank, firstName, lastName, commandList, commandNumber, dateStr, fileLink] = parts.map(p => p.trim());
+    const namedPersonMilitaryId = getMilitaryIdByPersonnelName(rank, firstName, lastName);
+    if (!namedPersonMilitaryId || String(currentUserMilitaryId).trim() !== String(namedPersonMilitaryId).trim()) {
+      return sendReply(userId, `❌ คุณไม่สามารถเพิ่มหนังสือคำสั่งในชื่อของผู้อื่นได้`);
+    }
+    const commandDate = parseThaiDateToDateObject(dateStr);
+    if (!commandDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+    const formattedDate = formatDateToThaiBuddhist(commandDate);
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const data = getSpreadsheetData('คำสั่งต่างๆ');
+    const isDuplicate = data.slice(1).some(row => String(row[4]).trim() === String(commandNumber).trim() && String(row[5]).trim() === formattedDate);
+    if (isDuplicate) return sendReply(userId, `❌ หนังสือคำสั่งที่ ${commandNumber} มีอยู่ในระบบแล้ว`);
+    commandSheet.appendRow([rank, firstName, lastName, commandList, commandNumber, formattedDate, fileLink]);
+    clearCache('คำสั่งต่างๆ');
+    sendReply(userId, `✅ เพิ่มหนังสือคำสั่ง "${commandList}" เรียบร้อยแล้ว`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleAddCommand: ${e.message}`);
+  }
+}
+
+function handleEditCommand(userId, text) {
+  try {
+    const currentUserMilitaryId = getUserMilitaryId(userId);
+    if (!currentUserMilitaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const cleanText = text.replace('/แก้ไขหนังสือคำสั่ง ', '');
+    const parts = cleanText.split('|');
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const data = commandSheet.getDataRange().getValues();
+    const commandFieldMap = { "ยศ": 0, "ชื่อ": 1, "สกุล": 2, "รายการคำสั่ง": 3, "คำสั่งที่": 4, "ลงวันที่": 5, "ลิงก์ไฟล์คำสั่ง": 6 };
+
+    if (parts.length === 4) { // Partial Update
+      const [oldCommandNumber, oldDateStr, fieldName, newValueRaw] = parts.map(p => p.trim());
+      const formattedOldDate = parseThaiDateToDateObject(oldDateStr) ? formatDateToThaiBuddhist(parseThaiDateToDateObject(oldDateStr)) : null;
+      if (!formattedOldDate) return sendReply(userId, '❗ รูปแบบวันที่เดิมไม่ถูกต้อง');
+      const colIndex = commandFieldMap[fieldName];
+      if (colIndex === undefined) return sendReply(userId, `❌ ไม่พบชื่อฟิลด์ "${fieldName}"`);
+      let foundRowIndex = -1, existingRank = '', existingFirstName = '', existingLastName = '';
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][4]).trim() === oldCommandNumber && String(data[i][5]).trim() === formattedOldDate) {
+          foundRowIndex = i; existingRank = data[i][0]; existingFirstName = data[i][1]; existingLastName = data[i][2]; break;
+        }
+      }
+      if (foundRowIndex === -1) return sendReply(userId, `❌ ไม่พบหนังสือคำสั่งที่ ${oldCommandNumber} ลงวันที่ ${formattedOldDate}`);
+      const existingOwnerMilitaryId = getMilitaryIdByPersonnelName(existingRank, existingFirstName, existingLastName);
+      if (String(currentUserMilitaryId).trim() !== String(existingOwnerMilitaryId).trim()) return sendReply(userId, `❌ คุณไม่มีสิทธิ์แก้ไขหนังสือคำสั่งของผู้อื่น`);
+      let newValue = (fieldName === "ลงวันที่") ? (parseThaiDateToDateObject(newValueRaw) ? formatDateToThaiBuddhist(parseThaiDateToDateObject(newValueRaw)) : null) : newValueRaw;
+      if (fieldName === "ลงวันที่" && !newValue) return sendReply(userId, '❗ รูปแบบวันที่ใหม่ไม่ถูกต้อง');
+      commandSheet.getRange(foundRowIndex + 1, colIndex + 1).setValue(newValue);
+      sendReply(userId, `✅ แก้ไขหนังสือคำสั่งที่ ${oldCommandNumber} เรียบร้อยแล้ว`);
+      clearCache('คำสั่งต่างๆ');
+    } else if (parts.length === 9) { // Full Update
+      const [oldCommandNumber, oldDateStr, newRank, newFirstName, newLastName, newCommandList, newCommandNumber, newDateStr, newFileLink] = parts.map(p => p.trim());
+      const formattedOldDate = parseThaiDateToDateObject(oldDateStr) ? formatDateToThaiBuddhist(parseThaiDateToDateObject(oldDateStr)) : null;
+      const formattedNewDate = parseThaiDateToDateObject(newDateStr) ? formatDateToThaiBuddhist(parseThaiDateToDateObject(newDateStr)) : null;
+      if (!formattedOldDate || !formattedNewDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+      let foundRowIndex = -1, existingRank = '', existingFirstName = '', existingLastName = '';
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][4]).trim() === oldCommandNumber && String(data[i][5]).trim() === formattedOldDate) {
+          foundRowIndex = i; existingRank = data[i][0]; existingFirstName = data[i][1]; existingLastName = data[i][2]; break;
+        }
+      }
+      if (foundRowIndex === -1) return sendReply(userId, `❌ ไม่พบหนังสือคำสั่งที่ ${oldCommandNumber} ลงวันที่ ${formattedOldDate}`);
+      const existingOwnerMilitaryId = getMilitaryIdByPersonnelName(existingRank, existingFirstName, existingLastName);
+      if (String(currentUserMilitaryId).trim() !== String(existingOwnerMilitaryId).trim()) return sendReply(userId, `❌ คุณไม่มีสิทธิ์แก้ไขหนังสือคำสั่งของผู้อื่น`);
+      const newOwnerMilitaryId = getMilitaryIdByPersonnelName(newRank, newFirstName, newLastName);
+      if (!newOwnerMilitaryId || String(currentUserMilitaryId).trim() !== String(newOwnerMilitaryId).trim()) return sendReply(userId, `❌ คุณไม่สามารถแก้ไขเพื่อโอนหนังสือคำสั่งให้ผู้อื่นได้`);
+      const newData = [newRank, newFirstName, newLastName, newCommandList, newCommandNumber, formattedNewDate, newFileLink];
+      commandSheet.getRange(foundRowIndex + 1, 1, 1, newData.length).setValues([newData]);
+      sendReply(userId, `✅ แก้ไขหนังสือคำสั่งที่ ${oldCommandNumber} เรียบร้อยแล้ว`);
+      clearCache('คำสั่งต่างๆ');
+    } else {
+      sendReply(userId, `❗ รูปแบบไม่ถูกต้อง
+📝 รูปแบบแก้ไขบางฟิลด์: /แก้ไขหนังสือคำสั่ง <คำสั่งที่>|<ลงวันที่>|<ชื่อฟิลด์>|<ค่าใหม่>
+📝 รูปแบบแก้ไขทั้งหมด: /แก้ไขหนังสือคำสั่ง <คำสั่งที่เดิม>|<ลงวันที่เดิม>|<ยศใหม่>|...`);
+    }
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleEditCommand: ${e.message}`);
+  }
+}
+
+function handleDeleteCommand(userId, text) {
+  try {
+    if (!checkAdminPermission(userId)) return sendReply(userId, '❌ คุณไม่มีสิทธิ์ลบหนังสือคำสั่ง');
+    const parts = text.replace('/ลบหนังสือคำสั่ง ', '').split('|');
+    if (parts.length !== 2) return sendReply(userId, '❗ รูปแบบ: /ลบหนังสือคำสั่ง <คำสั่งที่>|<ลงวันที่(พ.ศ.)>');
+    const [commandNumber, dateStr] = parts.map(p => p.trim());
+    const commandDate = parseThaiDateToDateObject(dateStr);
+    if (!commandDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+    const formattedDate = formatDateToThaiBuddhist(commandDate);
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const data = commandSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][4]).trim() === commandNumber && String(data[i][5]).trim() === formattedDate) {
+        commandSheet.deleteRow(i + 1);
+        sendReply(userId, `✅ ลบหนังสือคำสั่งที่ ${commandNumber} เรียบร้อยแล้ว`);
+        clearCache('คำสั่งต่างๆ');
+        return;
+      }
+    }
+    sendReply(userId, `❌ ไม่พบหนังสือคำสั่งที่ ${commandNumber} ลงวันที่ ${formattedDate}`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleDeleteCommand: ${e.message}`);
+  }
+}
+
+function handleSearchCommand(userId, text) {
+  try {
+    const keyword = text.replace('/ค้นหาหนังสือคำสั่ง ', '').trim().toLowerCase();
+    if (!keyword) return sendReply(userId, '❗ โปรดระบุคีย์เวิร์ดสำหรับค้นหา');
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const allCommands = getSpreadsheetData('คำสั่งต่างๆ').slice(1);
+    const matchingCommands = allCommands.filter(row => {
+      const searchableText = `${row[0]} ${row[1]} ${row[2]} ${row[3]} ${row[4]}`.toLowerCase();
+      return searchableText.includes(keyword);
+    });
+    if (matchingCommands.length === 0) return sendReply(userId, `📭 ไม่พบหนังสือคำสั่งที่ตรงกับคีย์เวิร์ด "${keyword}"`);
+    sendReply(userId, `📜 พบหนังสือคำสั่งที่เกี่ยวข้อง ${matchingCommands.length} รายการสำหรับ "${keyword}"`);
+    matchingCommands.slice(0, 10).forEach(row => sendFlexCommandInfo(userId, row[0], row[1], row[2], row[3], row[4], row[5], row[6]));
+    if (matchingCommands.length > 10) sendReply(userId, `...และยังมีอีก ${matchingCommands.length - 10} รายการ`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleSearchCommand: ${e.message}`);
+  }
+}
+
+function handleViewAllCommands(userId) {
+  try {
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const allCommands = getSpreadsheetData('คำสั่งต่างๆ').slice(1);
+    if (allCommands.length === 0) return sendReply(userId, '📭 ไม่มีหนังสือคำสั่งในระบบ');
+    sendReply(userId, `📜 แสดงหนังสือคำสั่งล่าสุด 10 รายการ`);
+    allCommands.slice(0, 10).reverse().forEach(row => sendFlexCommandInfo(userId, row[0], row[1], row[2], row[3], row[4], row[5], row[6]));
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleViewAllCommands: ${e.message}`);
+  }
+}
+
+function sendFlexCommandInfo(userId, rank, firstName, lastName, commandList, commandNumber, date, fileLink) {
+  function getPreviewDriveLink(fileLink) {
+    if (!fileLink) return '';
+    const match = fileLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) return `https://drive.google.com/file/d/${match[1]}/preview`;
+    return fileLink;
+  }
+  const previewLink = getPreviewDriveLink(fileLink);
+  const flexContents = {
+    type: "bubble", size: "giga",
+    header: { type: "box", layout: "vertical", contents: [{ type: "text", text: "📜 หนังสือคำสั่ง", weight: "bold", color: "#ffffff", size: "lg", align: "center" }], backgroundColor: "#4CAF50", paddingAll: "md" },
+    body: {
+      type: "box", layout: "vertical", spacing: "sm", paddingAll: "xl", contents: [
+        { type: "text", text: `${rank} ${firstName} ${lastName}`, weight: "bold", size: "md", wrap: true, color: "#333333" },
+        { type: "separator", margin: "md", color: "#eeeeee" },
+        createKeyValueBox("รายการคำสั่ง", commandList),
+        createKeyValueBox("คำสั่งที่", commandNumber),
+        createKeyValueBox("ลงวันที่", date)
+      ]
+    },
+    footer: { type: "box", layout: "vertical", spacing: "sm", contents: previewLink ? [{ type: "button", style: "primary", height: "sm", action: { type: "uri", label: "🔗 เปิดไฟล์คำสั่ง", uri: previewLink } }] : [{ type: "text", text: "ไม่มีลิงก์ไฟล์คำสั่ง", size: "sm", color: "#999999", align: "center" }] }
+  };
+  sendFlex(userId, flexContents);
+}
+
+function handleIncomingFileOrImage(userId, messageId, messageType, fileName, contentProvider) {
+  try {
+    CacheService.getUserCache().put(userId + '_lastMessageId', messageId, 300);
+    CacheService.getUserCache().put(userId + '_lastMessageType', messageType, 300);
+    CacheService.getUserCache().put(userId + '_lastFileName', fileName || 'unknown_file', 300);
+    sendReply(userId, `✅ ได้รับ ${messageType === 'image' ? 'รูปภาพ' : 'ไฟล์'} แล้ว!
+โปรดใช้คำสั่งเพื่อเชื่อมโยง:
+🖼️ รูปโปรไฟล์: /ตั้งรูปโปรไฟล์ <เลขทหาร>
+📜 ไฟล์คำสั่ง: /ลิงก์ไฟล์คำสั่ง <คำสั่งที่>|<ลงวันที่(พ.ศ.)>`);
+  } catch (e) {
+    sendReply(userId, `❌ เกิดข้อผิดพลาด: ${e.message}`);
+    Logger.log(`Error in handleIncomingFileOrImage: ${e.message}`);
+  }
+}
+
+function fetchFileFromLine(messageId) {
+  const url = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
+  const options = { headers: { 'Authorization': 'Bearer ' + CHANNEL_ACCESS_TOKEN }, method: 'get', muteHttpExceptions: true };
+  const response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() === 200) return response.getBlob();
+  const errorBody = response.getContentText();
+  Logger.log(`Error fetching file from Line: ${response.getResponseCode()} - ${errorBody}`);
+  throw new Error(`ไม่สามารถดึงไฟล์จาก LINE ได้: รหัส ${response.getResponseCode()}`);
+}
+
+function uploadFileToDrive(fileName, blob, folderName) {
+  try {
+    if (!blob || !blob.getBytes || blob.getBytes().length === 0) throw new Error("ไม่พบข้อมูล blob");
+    const parentFolder = getOrCreateDriveFolder(folderName);
+    const file = parentFolder.createFile(blob.setName(fileName));
+    if (!file) throw new Error("สร้างไฟล์ไม่สำเร็จ");
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const fileId = file.getId();
+    return { fileUrl: file.getUrl(), imageUrl: `https://drive.google.com/uc?export=view&id=${fileId}` };
+  } catch (e) {
+    Logger.log(`Error uploading file to Drive: ${e.message}`);
+    throw new Error(`ไม่สามารถอัปโหลดไฟล์ขึ้น Google Drive ได้: ${e.message}`);
+  }
+}
+
+function getOrCreateDriveFolder(folderName) {
+  const folders = DriveApp.getFoldersByName(folderName);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(folderName);
+}
+
+function handleSetProfilePicture(userId, text) {
+  try {
+    const currentUserMilitaryId = getUserMilitaryId(userId);
+    if (!currentUserMilitaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const targetMilitaryId = text.replace('/ตั้งรูปโปรไฟล์ ', '').trim();
+    if (!targetMilitaryId) return sendReply(userId, '❗ รูปแบบ: /ตั้งรูปโปรไฟล์ <เลขประจำตัวทหาร>');
+    if (String(currentUserMilitaryId).trim() !== String(targetMilitaryId).trim() && !checkAdminPermission(userId)) {
+      return sendReply(userId, '❌ คุณไม่มีสิทธิ์ตั้งรูปโปรไฟล์ของผู้อื่น');
+    }
+    const lastMessageId = CacheService.getUserCache().get(userId + '_lastMessageId');
+    const lastMessageType = CacheService.getUserCache().get(userId + '_lastMessageType');
+    const lastFileName = CacheService.getUserCache().get(userId + '_lastFileName');
+    if (!lastMessageId || lastMessageType !== 'image') return sendReply(userId, '❗ กรุณาส่งรูปภาพก่อน');
+    const personnelSheet = SpreadsheetApp.getActive().getSheetByName('ข้อมูลกำลังพล');
+    if (!personnelSheet) return sendReply(userId, '❌ ไม่พบชีท "ข้อมูลกำลังพล"');
+    const data = personnelSheet.getDataRange().getValues();
+    let foundRowIndex = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][5]).trim() === String(targetMilitaryId).trim()) {
+        foundRowIndex = i;
+        break;
+      }
+    }
+    if (foundRowIndex === -1) return sendReply(userId, `❌ ไม่พบข้อมูลกำลังพลเลขทหาร "${targetMilitaryId}"`);
+    sendReply(userId, '⏳ กำลังอัปโหลดรูปโปรไฟล์ กรุณารอสักครู่...');
+    const imageBlob = fetchFileFromLine(lastMessageId);
+    const result = uploadFileToDrive(`profile_${targetMilitaryId}`, imageBlob, PROFILE_PICTURE_FOLDER_NAME);
+    personnelSheet.getRange(foundRowIndex + 1, 18).setValue(result.fileUrl);
+    personnelSheet.getRange(foundRowIndex + 1, 19).setFormula(`=IMAGE("${result.imageUrl}")`);
+    CacheService.getUserCache().removeAll([userId + '_lastMessageId', userId + '_lastMessageType', userId + '_lastFileName']);
+    sendReply(userId, `✅ ตั้งรูปโปรไฟล์สำหรับเลขทหาร "${targetMilitaryId}" เรียบร้อยแล้ว`);
+    clearCache('ข้อมูลกำลังพล');
+  } catch (e) {
+    Logger.log(`Error in handleSetProfilePicture: ${e.message}`);
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการตั้งรูปโปรไฟล์: ${e.message}`);
+  }
+}
+
+function handleLinkCommandFile(userId, text) {
+  try {
+    const currentUserMilitaryId = getUserMilitaryId(userId);
+    if (!currentUserMilitaryId) return sendReply(userId, '❌ กรุณาลงทะเบียนก่อนใช้งาน');
+    const parts = text.replace('/ลิงก์ไฟล์คำสั่ง ', '').split('|');
+    if (parts.length !== 2) return sendReply(userId, `❗ รูปแบบไม่ถูกต้อง: /ลิงก์ไฟล์คำสั่ง <คำสั่งที่>|<ลงวันที่(พ.ศ.)>`);
+    const [commandNumber, dateStr] = parts.map(p => p.trim());
+    const commandDate = parseThaiDateToDateObject(dateStr);
+    if (!commandDate) return sendReply(userId, '❗ รูปแบบวันที่ไม่ถูกต้อง');
+    const formattedDate = formatDateToThaiBuddhist(commandDate);
+    const lastMessageId = CacheService.getUserCache().get(userId + '_lastMessageId');
+    const lastMessageType = CacheService.getUserCache().get(userId + '_lastMessageType');
+    const lastFileName = CacheService.getUserCache().get(userId + '_lastFileName');
+    if (!lastMessageId || (lastMessageType !== 'image' && lastMessageType !== 'file')) return sendReply(userId, '❗ กรุณาส่งไฟล์เอกสาร (หรือรูปภาพ) ก่อน');
+    const commandSheet = SpreadsheetApp.getActive().getSheetByName('คำสั่งต่างๆ');
+    if (!commandSheet) return sendReply(userId, '❌ ไม่พบชีท "คำสั่งต่างๆ"');
+    const data = commandSheet.getDataRange().getValues();
+    let foundRowIndex = -1, existingRank = '', existingFirstName = '', existingLastName = '';
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][4]).trim() === commandNumber && String(data[i][5]).trim() === formattedDate) {
+        foundRowIndex = i; existingRank = data[i][0]; existingFirstName = data[i][1]; existingLastName = data[i][2]; break;
+      }
+    }
+    if (foundRowIndex === -1) return sendReply(userId, `❌ ไม่พบหนังสือคำสั่งที่ ${commandNumber}`);
+    const commandOwnerMilitaryId = getMilitaryIdByPersonnelName(existingRank, existingFirstName, existingLastName);
+    if ((!commandOwnerMilitaryId || String(currentUserMilitaryId).trim() !== String(commandOwnerMilitaryId).trim()) && !checkAdminPermission(userId)) {
+      return sendReply(userId, '❌ คุณไม่มีสิทธิ์ลิงก์ไฟล์กับหนังสือคำสั่งของผู้อื่น');
+    }
+    sendReply(userId, '⏳ กำลังอัปโหลดไฟล์คำสั่ง กรุณารอสักครู่...');
+    const fileBlob = fetchFileFromLine(lastMessageId);
+    const uploadFileName = `${commandNumber.replace(/\//g, '_')}_${formattedDate.replace(/\//g, '-')}_${lastFileName || 'command_file'}`;
+    const uploadedResult = uploadFileToDrive(uploadFileName, fileBlob, COMMAND_FILES_FOLDER_NAME);
+    commandSheet.getRange(foundRowIndex + 1, 7).setValue(uploadedResult.fileUrl);
+    CacheService.getUserCache().removeAll([userId + '_lastMessageId', userId + '_lastMessageType', userId + '_lastFileName']);
+    sendReply(userId, `✅ ลิงก์ไฟล์เข้ากับหนังสือคำสั่งที่ ${commandNumber} เรียบร้อยแล้ว`);
+    clearCache('คำสั่งต่างๆ');
+  } catch (e) {
+    Logger.log(`Error in handleLinkCommandFile: ${e.message}`);
+    sendReply(userId, `❌ เกิดข้อผิดพลาดในการลิงก์ไฟล์: ${e.message}`);
+  }
+}
